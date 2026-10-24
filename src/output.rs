@@ -235,17 +235,19 @@ pub fn post_webhook(url: &str, reports: &[&Report]) -> Result<()> {
     if reports.is_empty() {
         return Ok(());
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(20))
-        .try_proxy_from_env(!is_local_url(url))
+    let proxy = if is_local_url(url) { None } else { ureq::Proxy::try_from_env() };
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(20)))
+        .proxy(proxy)
         .build();
+    let agent = ureq::Agent::new_with_config(config);
     let body = json!({"tool": "doubleagent", "generated_at": crate::store::now(), "reports": reports});
     // Excerpts can contain secrets: redact before anything leaves the machine.
     let text = Redactor::new().redact(&serde_json::to_string(&body)?);
     agent
         .post(url)
-        .set("content-type", "application/json")
-        .send_string(&text)
+        .header("content-type", "application/json")
+        .send(text.as_bytes())
         .map_err(|e| anyhow::anyhow!("webhook: {e}"))?;
     Ok(())
 }
