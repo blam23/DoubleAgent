@@ -100,6 +100,16 @@ impl<'a> Engine<'a> {
     }
 
     pub fn process(&self, paths: Vec<PathBuf>) -> Result<Outcome> {
+        self.run(paths, self.opts.skip_unchanged)
+    }
+
+    /// Process files a watcher reported as changed. Never takes the size/mtime fast
+    /// path: a same-size rewrite with its mtime restored would look unchanged.
+    pub fn process_changed(&self, paths: Vec<PathBuf>) -> Result<Outcome> {
+        self.run(paths, false)
+    }
+
+    fn run(&self, paths: Vec<PathBuf>, skip_unchanged: bool) -> Result<Outcome> {
         let mut out = Outcome::default();
         let enricher = Enricher::new(&self.cfg.provenance, self.matcher);
         let allow = Allow::load(self.store)?;
@@ -107,7 +117,7 @@ impl<'a> Engine<'a> {
         // 0. Reconcile fast path.
         let mut todo = Vec::new();
         for p in paths {
-            if self.opts.skip_unchanged {
+            if skip_unchanged {
                 if let (Some((size, mtime, fid)), Some(row)) = (scanner::quick_stat(&p), self.store.get_file(&p)?) {
                     if row.size == size && row.mtime == mtime && row.file_id == fid {
                         out.unchanged += 1;

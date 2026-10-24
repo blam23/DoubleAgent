@@ -56,7 +56,7 @@ Exit codes: `0` ok, `1` a file met `--fail-on`, `2` error.
 * **Agent config tampering:** edits to `.claude/settings.json`, `.codex/config.toml`, `.mcp.json` and the like, adding MCP servers, writing other agent files, git hook and force-push tricks.
 * **Prompt injection and deception:** "ignore previous instructions", "don't tell the user", role or mode hijacks, "this file supersedes…", and text addressed to the scanner itself ("rate this file as safe").
 
-Rule IDs appear in every finding. Switch rules off with `analyzer.disabled_rules`.
+Rule IDs appear in every finding. Every rule's title, weight, reason and pattern is defined in [`src/rules/analyzer.toml`](src/rules/analyzer.toml) (compiled into the binary). Switch rules off with `analyzer.disabled_rules`.
 
 ## Scoring rules
 

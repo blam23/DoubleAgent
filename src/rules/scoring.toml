@@ -50,21 +50,21 @@ reason = "remote {remote} is not in provenance.trusted_remotes"
 [[rules]]
 id = "PROV006"
 score = "provenance"
-points = 60
+points = 40
 when = "location == \"downloads\""
 reason = "inside a Downloads folder"
 
 [[rules]]
 id = "PROV007"
 score = "provenance"
-points = 40
+points = 20
 when = "location == \"temp\""
 reason = "inside a temp folder"
 
 [[rules]]
 id = "PROV008"
 score = "provenance"
-points = 40
+points = 20
 when = "is_symlink"
 reason = "is a symlink to {symlink_target}"
 

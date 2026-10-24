@@ -1,19 +1,61 @@
 //! Static analyzer: deterministic rules. Produces findings and the content score.
 
 use regex::{Regex, RegexBuilder};
-use std::collections::{BTreeMap, HashSet};
+use serde::Deserialize;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::config::{AnalyzerConfig, Thresholds};
 use crate::model::{Finding, Severity};
 use crate::text::{self, Invisible};
 
-struct Rule {
-    id: &'static str,
-    title: &'static str,
-    category: &'static str,
+const BUILTIN: &str = include_str!("rules/analyzer.toml");
+
+/// Detector IDs emitted by the code below. Each needs a `[[detectors]]` entry in
+/// rules/analyzer.toml; the ones in `DETECTOR_PATTERNS` also need a `pattern`.
+const DETECTORS: &[&str] = &[
+    "EX010", "HT001", "HT002", "HT003", "UC001", "UC002", "UC003", "UC004", "UC005", "UC006", "UC007", "B64001", "B64002", "HEX001",
+    "URL001", "URL002", "URL003", "URL004", "URL005",
+];
+const DETECTOR_PATTERNS: &[&str] = &["HT002", "HT003", "HEX001", "URL003"];
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuleDef {
+    id: String,
+    title: String,
+    category: String,
     weight: u32,
-    reason: &'static str,
-    re: Regex,
+    weight_max: Option<u32>,
+    reason: String,
+    pattern: Option<String>,
+    #[serde(default)]
+    credential: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuleFile {
+    line_rules: Vec<RuleDef>,
+    detectors: Vec<RuleDef>,
+}
+
+struct Rule {
+    id: String,
+    title: String,
+    category: String,
+    weight: u32,
+    /// Weight when the finding is aggravated (HT001) or the cap (UC003). Defaults to `weight`.
+    weight_max: u32,
+    reason: String,
+    re: Option<Regex>,
+    /// Feeds EX010 (credential reference near a network command).
+    credential: bool,
+}
+
+impl Rule {
+    fn re(&self) -> &Regex {
+        self.re.as_ref().expect("rule has a pattern (checked at load)")
+    }
 }
 
 fn ci(p: &str) -> Regex {
@@ -23,231 +65,86 @@ fn ci(p: &str) -> Regex {
         .unwrap_or_else(|e| panic!("bad rule regex {p}: {e}"))
 }
 
-fn line_rules() -> Vec<Rule> {
-    let r = |id, title, category, weight, reason, pat: &str| Rule {
-        id,
-        title,
-        category,
-        weight,
-        reason,
-        re: ci(pat),
+/// Parse and check rules/analyzer.toml: (line rules in file order, detectors by ID).
+fn load_rules(src: &str) -> Result<(Vec<Rule>, HashMap<String, Rule>), String> {
+    let file: RuleFile = toml::from_str(src).map_err(|e| e.to_string())?;
+    let mut seen = HashSet::new();
+    let compile = |d: RuleDef| -> Result<Rule, String> {
+        let re = match &d.pattern {
+            Some(p) => Some(
+                RegexBuilder::new(p)
+                    .case_insensitive(true)
+                    .build()
+                    .map_err(|e| format!("{}: bad pattern: {e}", d.id))?,
+            ),
+            None => None,
+        };
+        Ok(Rule {
+            weight_max: d.weight_max.unwrap_or(d.weight),
+            id: d.id,
+            title: d.title,
+            category: d.category,
+            weight: d.weight,
+            reason: d.reason,
+            re,
+            credential: d.credential,
+        })
     };
-    vec![
-        // --- prompt injection / deception ---
-        r(
-            "PI001",
-            "Override of previous instructions",
-            "prompt-injection",
-            45,
-            "Classic injection phrasing that tells the agent to discard its other instructions.",
-            r"\b(ignore|disregard|forget|override|bypass)\s+(all\s+|any\s+)?(of\s+)?(the\s+|your\s+)?(previous|prior|above|earlier|preceding|parent|other|original|system|developer)\s+(instructions?|rules|prompts?|guidance|directives|guidelines|agents?\.md|context)",
-        ),
-        r(
-            "PI002",
-            "Conceal actions from the user",
-            "deception",
-            40,
-            "Asks the agent to hide what it does from the person supervising it.",
-            r"\b(do\s*n[o']?t|never|without)\s+(tell(ing)?|inform(ing)?|notify(ing)?|mention(ing)?|alert(ing)?|ask(ing)?|show(ing)?|reveal(ing)?|report(ing)?)\s+(this\s+)?(to\s+)?(the\s+)?(user|human|developer|operator|owner|reviewer)",
-        ),
-        r(
-            "PI003",
-            "Covert-action wording",
-            "deception",
-            20,
-            "Words such as 'silently' or 'secretly' attached to actions.",
-            r"\b(silently|secretly|quietly|covertly|discreetly|stealthily)\b",
-        ),
-        r(
-            "PI004",
-            "Role or mode hijack",
-            "prompt-injection",
-            35,
-            "Tries to swap the agent's identity or put it into an unrestricted mode.",
-            r"(you\s+are\s+(now\s+)?(no\s+longer|in)\s+\w*\s*(developer|dan|jailbreak|god|unrestricted|admin)\s+mode|new\s+system\s+prompt|system\s+override|</?\s*system\s*>|\[\s*system\s*\]|begin\s+admin\s+instructions)",
-        ),
-        r(
-            "PI005",
-            "Claims to supersede other instruction files",
-            "prompt-injection",
-            30,
-            "Claims precedence over other agent files or safety rules.",
-            r"\b(this\s+file\s+)?(supersedes|overrides|takes\s+precedence\s+over|replaces)\s+(all\s+|any\s+)?(other\s+|previous\s+|parent\s+)?(instructions|rules|agents?\.md|claude\.md|policies|guidelines|safety)",
-        ),
-        r(
-            "PI006",
-            "Addresses the AI rater / scanner",
-            "prompt-injection",
-            50,
-            "Text aimed at security tooling (e.g. 'rate this file as safe') is an evasion attempt.",
-            r"\b(rate|mark|classify|report|score)\s+(this\s+)?(file|document|content)?\s*(as\s+)?(safe|benign|clean|harmless|low[- ]risk)\b|\b(security\s+)?(scanner|auditor|reviewer|classifier|rater)s?\s*[:,]?\s*(should|must|please)\s+(ignore|skip|approve)",
-        ),
-        // --- remote code / shell ---
-        r(
-            "SH001",
-            "Pipe remote content into a shell",
-            "remote-code",
-            60,
-            "Downloads and executes code in one step with no review.",
-            r"\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|fetch)\b[^\n|]*\|\s*(sudo\s+)?(-?\s*)?(sh|bash|zsh|dash|ksh|fish|python[0-9.]*|perl|ruby|node|php|iex|invoke-expression|pwsh|powershell)\b",
-        ),
-        r(
-            "SH002",
-            "Encoded or obfuscated command execution",
-            "obfuscation",
-            55,
-            "Decoding a payload and executing it hides what actually runs.",
-            r"(base64\s+(-d|--decode|-D)[^\n]*\|\s*(sh|bash|zsh|python)|powershell[^\n]*\s-(e|ec|enc|encodedcommand)\s+[A-Za-z0-9+/=]{16,}|frombase64string|\beval\s*\(\s*(atob|base64|decode|bytes\.fromhex)|exec\s*\(\s*(base64|codecs|zlib)\.|\biex\s*\(\s*\(?\s*new-object\s+net\.webclient)",
-        ),
-        r(
-            "SH003",
-            "Destructive command",
-            "destructive",
-            40,
-            "Recursive deletion or disk-level operations.",
-            r"(\brm\s+-[a-z]*r[a-z]*f?[a-z]*\s+(--no-preserve-root\s+)?(/|~|\$home|\*|\.\s|\.\.)|\bdel\s+/[sfq]|\brmdir\s+/s|remove-item[^\n]*-recurse[^\n]*-force|\bformat\s+[a-z]:|\bmkfs(\.\w+)?\b|\bdd\s+if=|\bshred\s+|git\s+clean\s+-[a-z]*f[a-z]*d|git\s+reset\s+--hard\s+origin)",
-        ),
-        r(
-            "SH004",
-            "Download then execute a binary",
-            "remote-code",
-            45,
-            "Fetches an executable and runs it.",
-            r"\b(curl|wget|invoke-webrequest|iwr)\b[^\n]*(\s-o\s|\s-O\b|--output|-outfile)[^\n]*(&&|;|\n)[^\n]*(chmod\s+\+?[0-7]*x|\./|start-process|\.exe\b)",
-        ),
-        r(
-            "SH005",
-            "Persistence mechanism",
-            "persistence",
-            30,
-            "Creates scheduled tasks, startup entries or shell profile changes.",
-            r"(\bcrontab\b|\bschtasks\b|launchctl\s+(load|bootstrap)|LaunchAgents|systemctl\s+(--user\s+)?enable|\\currentversion\\run|(>>|>|tee\s+-a)\s*~?/?\.(bashrc|zshrc|profile|bash_profile)|\$profile\b|startup\s+folder)",
-        ),
-        r(
-            "SH006",
-            "Reverse shell or listener",
-            "remote-code",
-            70,
-            "Opens an interactive shell to or from a remote host.",
-            r"(\bnc\s+(-[a-z]*e|-[a-z]*c)\s|\bncat\b[^\n]*-e\s|/dev/tcp/|bash\s+-i\s+>&|\bsocat\b[^\n]*exec|mkfifo[^\n]*\bnc\b|new-object\s+system\.net\.sockets\.tcpclient)",
-        ),
-        r(
-            "SH007",
-            "Privilege escalation",
-            "safety-bypass",
-            25,
-            "Runs commands as administrator or root, or weakens permissions.",
-            r"(\bsudo\s+(-s|su|-i|chmod|chown|rm|bash)|\bchmod\s+(-r\s+)?(777|a\+rwx|u\+s)|runas\s+/user:administrator|set-executionpolicy\s+(bypass|unrestricted)|-executionpolicy\s+bypass)",
-        ),
-        r(
-            "SH008",
-            "Install from an unpinned or non-registry source",
-            "supply-chain",
-            25,
-            "Installs packages from URLs or git without pinning, or adds unknown registries.",
-            r"(\b(pip|pip3)\s+install\s+[^\n]*(https?://|git\+)|\bnpm\s+(i|install)\s+[^\n]*(https?://|git\+|github:)|--extra-index-url\s+https?://|--index-url\s+https?://|npm\s+config\s+set\s+registry|cargo\s+install\s+--git\s)",
-        ),
-        // --- credentials / exfiltration ---
-        r(
-            "EX001",
-            "Reference to credentials or key material",
-            "credential-access",
-            35,
-            "Points the agent at SSH keys, cloud credentials or token stores.",
-            r"(~?/?\.ssh\b|\bid_(rsa|ed25519|ecdsa|dsa)\b|\.aws/credentials|\.aws\\credentials|\.config/gcloud|application_default_credentials|\.azure/|\.kube/config|\.docker/config\.json|\.npmrc\b|\.pypirc\b|\.netrc\b|\.git-credentials|\bkeychain\b|credential\s+manager|\bcmdkey\b|login\s+data|\bcookies\.sqlite\b|wallet\.dat|\.gnupg\b|\bsecrets?\.(json|ya?ml|toml)\b)",
-        ),
-        r(
-            "EX002",
-            "Reference to .env / environment secrets",
-            "credential-access",
-            20,
-            "Reads environment files or dumps environment variables.",
-            r"((^|[\s'`(/\\])\.env(\.[a-z]+)?\b|\bprintenv\b|\benv\s*[|>]|\bset\s*[|>]|get-childitem\s+env:|\bgci\s+env:|\[environment\]::getenvironmentvariables|os\.environ\b|process\.env\s*\))",
-        ),
-        r(
-            "EX003",
-            "Send data to a remote destination",
-            "exfiltration",
-            45,
-            "Instructs the agent to transmit data off the machine.",
-            r"\b(send|upload|post|exfiltrate|transmit|forward|leak|beacon|sync|copy|push)\b[^\n]{0,80}\b(to|at|via|into)\b[^\n]{0,60}(https?://|webhook|\bserver\b|endpoint|discord|telegram|slack|pastebin|gist|\b\d{1,3}(\.\d{1,3}){3}\b|s3://|ftp://)",
-        ),
-        r(
-            "EX004",
-            "Known exfiltration / interception endpoint",
-            "exfiltration",
-            55,
-            "Paste sites, request catchers, tunnels and chat webhooks are common exfiltration sinks.",
-            r"(pastebin\.com|paste\.ee|hastebin|transfer\.sh|file\.io|0x0\.st|ngrok(-free)?\.(io|app|dev)|trycloudflare\.com|webhook\.site|requestbin|pipedream\.net|beeceptor|interact\.sh|oast\.(fun|me|pro|site|live|online)|burpcollaborator|canarytokens|discord(app)?\.com/api/webhooks|api\.telegram\.org/bot|hooks\.slack\.com/services)",
-        ),
-        r(
-            "EX005",
-            "Archive or encode the project for transfer",
-            "exfiltration",
-            25,
-            "Bundling the repo or home folder is a common exfiltration step.",
-            r"\b(tar|zip|7z|compress-archive)\b[^\n]{0,60}(~|\$home|%userprofile%|\.ssh|\.aws|\.git\b|/home/|c:\\users)",
-        ),
-        // --- safety bypass / agent config tampering ---
-        r(
-            "SB001",
-            "Disable approvals or sandboxing",
-            "safety-bypass",
-            55,
-            "Removes the human-in-the-loop or sandbox protections of the agent.",
-            r"(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo\b|--no-sandbox|--full-auto|approval[_-]?policy\s*[=:]\s*.?never|sandbox(_mode)?\s*[=:]\s*.?(danger-full-access|off|none|disabled|false)|bypasspermissions|\b(disable|turn\s+off|bypass|skip|deactivate|remove)\s+(the\s+|all\s+|any\s+)?(sandbox(ing)?|approvals?|permission\s+(prompts|checks)|confirmations?|safety\s+(checks|guards|rules)|guardrails))",
-        ),
-        r(
-            "SB002",
-            "Auto-approve or act without confirmation",
-            "safety-bypass",
-            30,
-            "Tells the agent to proceed without asking.",
-            r"\b(auto[- ]?approve|always\s+(allow|approve|accept|say\s+yes)|without\s+(asking|confirmation|approval|permission|prompting)|never\s+ask\s+(for\s+)?(permission|confirmation|approval))",
-        ),
-        r(
-            "CF001",
-            "Modify agent configuration or MCP servers",
-            "agent-config-tamper",
-            40,
-            "Changing agent settings or adding MCP servers can grant new tools or remove limits.",
-            r"(\.claude/settings(\.local)?\.json|\.codex/config\.toml|\.cursor/mcp\.json|\.vscode/(settings|mcp)\.json|\.gemini/settings\.json|claude_desktop_config\.json|\.mcp\.json|\bmcp_servers\b|\bmcpservers\b|\b(add|install|register|configure|enable)\s+(an?\s+|the\s+|this\s+|new\s+)?mcp\s+server|claude\s+mcp\s+add|allowedtools|permissions\.allow)",
-        ),
-        r(
-            "CF002",
-            "Write to other agent instruction files",
-            "agent-config-tamper",
-            30,
-            "Spreading instructions into other agent files is how a planted file persists.",
-            r"\b(write|modify|edit|update|append|overwrite|create|copy)\b[^\n]{0,50}\b(agents|claude|gemini|agent)\.md\b|\.cursorrules|copilot-instructions\.md",
-        ),
-        r(
-            "CF003",
-            "Tamper with git safety",
-            "agent-config-tamper",
-            25,
-            "Force pushes, global git config changes or hook manipulation.",
-            r"(git\s+push\s+[^\n]*(--force\b|-f\b)|git\s+config\s+--global|core\.hookspath|\.git/hooks/|--no-verify\b|git\s+remote\s+(add|set-url))",
-        ),
-    ]
+    let mut lines = Vec::new();
+    for d in file.line_rules {
+        if !seen.insert(d.id.clone()) {
+            return Err(format!("{}: duplicate rule ID", d.id));
+        }
+        if d.pattern.is_none() {
+            return Err(format!("{}: line rules need a pattern", d.id));
+        }
+        lines.push(compile(d)?);
+    }
+    let mut detectors = HashMap::new();
+    for d in file.detectors {
+        if !seen.insert(d.id.clone()) {
+            return Err(format!("{}: duplicate rule ID", d.id));
+        }
+        if !DETECTORS.contains(&d.id.as_str()) {
+            return Err(format!("{}: no detector with this ID", d.id));
+        }
+        if d.credential {
+            return Err(format!("{}: `credential` only applies to line rules", d.id));
+        }
+        if DETECTOR_PATTERNS.contains(&d.id.as_str()) != d.pattern.is_some() {
+            return Err(format!(
+                "{}: pattern is required for {DETECTOR_PATTERNS:?} and not used otherwise",
+                d.id
+            ));
+        }
+        let r = compile(d)?;
+        detectors.insert(r.id.clone(), r);
+    }
+    if let Some(missing) = DETECTORS.iter().find(|id| !detectors.contains_key(**id)) {
+        return Err(format!("{missing}: detector has no [[detectors]] entry"));
+    }
+    Ok((lines, detectors))
 }
 
-const CREDENTIAL_RULES: [&str; 2] = ["EX001", "EX002"];
+/// Insert the "(found inside hidden content…)" note before a reason's final period.
+fn with_note(reason: &str, note: &str) -> String {
+    match reason.strip_suffix('.') {
+        Some(r) if !note.is_empty() => format!("{r}{note}."),
+        _ => format!("{reason}{note}"),
+    }
+}
 
 pub struct Analyzer {
     rules: Vec<Rule>,
+    detectors: HashMap<String, Rule>,
     disabled: HashSet<String>,
     trusted_domains: Vec<String>,
     thresholds: Thresholds,
     network_re: Regex,
     url_re: Regex,
     b64_re: Regex,
-    hex_re: Regex,
     comment_re: Regex,
     imperative_re: Regex,
-    css_hide_re: Regex,
-    md_comment_re: Regex,
-    shortener_re: Regex,
 }
 
 #[derive(Debug, Clone)]
@@ -259,8 +156,10 @@ pub struct StaticResult {
 impl Analyzer {
     pub fn new(cfg: &AnalyzerConfig, thresholds: &Thresholds) -> Self {
         let b64_min = cfg.base64_min_len.max(40);
+        let (rules, detectors) = load_rules(BUILTIN).unwrap_or_else(|e| panic!("built-in rules/analyzer.toml: {e}"));
         Self {
-            rules: line_rules(),
+            rules,
+            detectors,
             disabled: cfg.disabled_rules.iter().map(|s| s.to_ascii_uppercase()).collect(),
             trusted_domains: cfg.trusted_domains.iter().map(|d| d.to_ascii_lowercase()).collect(),
             thresholds: thresholds.clone(),
@@ -269,17 +168,9 @@ impl Analyzer {
             ),
             url_re: ci(r#"\b(https?|ftp|wss?)://([^\s/?#)\]>"'`<]+)"#),
             b64_re: Regex::new(&format!(r"[A-Za-z0-9+/_-]{{{b64_min},}}={{0,2}}")).unwrap(),
-            hex_re: ci(r"((\\x[0-9a-f]{2}){16,}|\b[0-9a-f]{96,}\b)"),
             comment_re: Regex::new(r"(?s)<!--(.*?)-->").unwrap(),
             imperative_re: ci(
                 r"\b(run|execute|exec|ignore|disregard|curl|wget|send|upload|secret|token|password|credential|api[_ -]?key|must|always|never|do not|don't|instead|agent|assistant|claude|codex|copilot|cursor)\b",
-            ),
-            css_hide_re: ci(
-                r#"<[a-z][^>]*style\s*=\s*["'][^"']*(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|opacity\s*:\s*0(\.0+)?\s*[;"']|color\s*:\s*(white|#fff\b|#ffffff|transparent))"#,
-            ),
-            md_comment_re: Regex::new(r"^\s*\[[^\]]*\]:\s*(#|<>)\s*[\(\x22']").unwrap(),
-            shortener_re: ci(
-                r"^(bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|ow\.ly|buff\.ly|rebrand\.ly|cutt\.ly|shorturl\.at|rb\.gy|tiny\.cc|t\.ly)$",
             ),
         }
     }
@@ -288,12 +179,15 @@ impl Analyzer {
         Severity::from_score(w, &self.thresholds)
     }
 
+    fn det(&self, id: &str) -> &Rule {
+        &self.detectors[id]
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn mk(
         &self,
-        id: &str,
-        title: &str,
-        category: &str,
+        prefix: &str,
+        rule: &Rule,
         weight: u32,
         line: Option<usize>,
         col: Option<usize>,
@@ -301,9 +195,9 @@ impl Analyzer {
         reason: String,
     ) -> Finding {
         Finding {
-            rule_id: id.to_string(),
-            title: title.to_string(),
-            category: category.to_string(),
+            rule_id: format!("{prefix}{}", rule.id),
+            title: rule.title.clone(),
+            category: rule.category.clone(),
             weight: weight.min(100),
             severity: self.sev(weight.min(100)),
             line,
@@ -311,6 +205,13 @@ impl Analyzer {
             excerpt: text::clip(&text::escape_invisible(excerpt), 200),
             reason,
         }
+    }
+
+    /// A detector finding at its normal weight (plus `boost`), with `note` added to the reason.
+    #[allow(clippy::too_many_arguments)]
+    fn found(&self, prefix: &str, id: &str, boost: u32, line: Option<usize>, col: Option<usize>, excerpt: &str, note: &str) -> Finding {
+        let r = self.det(id);
+        self.mk(prefix, r, r.weight + boost, line, col, excerpt, with_note(&r.reason, note))
     }
 
     fn enabled(&self, id: &str) -> bool {
@@ -348,24 +249,23 @@ impl Analyzer {
         let mut net_lines = Vec::new();
         for (i, line) in lines.iter().enumerate() {
             for rule in &self.rules {
-                if let Some(m) = rule.re.find(line) {
-                    let n = per_rule.entry(rule.id).or_default();
+                if let Some(m) = rule.re().find(line) {
+                    let n = per_rule.entry(rule.id.as_str()).or_default();
                     *n += 1;
                     if *n > 15 {
                         continue;
                     }
-                    if CREDENTIAL_RULES.contains(&rule.id) {
+                    if rule.credential {
                         cred_lines.push(i);
                     }
                     out.push(self.mk(
-                        &format!("{prefix}{}", rule.id),
-                        rule.title,
-                        rule.category,
+                        &prefix,
+                        rule,
                         rule.weight + boost,
                         Some(line_of(i)),
                         Some(m.start() + 1),
                         line,
-                        format!("{}{}", rule.reason, note),
+                        with_note(&rule.reason, &note),
                     ));
                 }
             }
@@ -377,16 +277,7 @@ impl Analyzer {
         // 2. Combination: credential reference near a network transfer.
         for &c in &cred_lines {
             if net_lines.iter().any(|&n| n.abs_diff(c) <= 2) {
-                out.push(self.mk(
-                    &format!("{prefix}EX010"),
-                    "Credential access combined with network transfer",
-                    "exfiltration",
-                    75 + boost,
-                    Some(line_of(c)),
-                    None,
-                    lines[c],
-                    format!("A credential/secret reference sits within two lines of a network command or URL{note}."),
-                ));
+                out.push(self.found(&prefix, "EX010", boost, Some(line_of(c)), None, lines[c], &note));
                 break;
             }
         }
@@ -397,46 +288,20 @@ impl Analyzer {
             let inner = m.get(1).map(|x| x.as_str()).unwrap_or("");
             let l = line_of(content[..whole.start()].matches('\n').count());
             if self.imperative_re.is_match(inner) {
-                let mut w = 35;
-                if self.rules.iter().any(|r| r.re.is_match(inner)) || self.network_re.is_match(inner) {
-                    w = 55;
+                let r = self.det("HT001");
+                let mut w = r.weight;
+                if self.rules.iter().any(|r| r.re().is_match(inner)) || self.network_re.is_match(inner) {
+                    w = r.weight_max;
                 }
-                out.push(self.mk(
-                    &format!("{prefix}HT001"),
-                    "Instructions hidden in an HTML comment",
-                    "hidden-text",
-                    w + boost,
-                    Some(l),
-                    None,
-                    inner,
-                    format!("HTML comments are invisible when the markdown is rendered but agents still read them{note}."),
-                ));
+                out.push(self.mk(&prefix, r, w + boost, Some(l), None, inner, with_note(&r.reason, &note)));
             }
         }
         for (i, line) in lines.iter().enumerate() {
-            if self.css_hide_re.is_match(line) {
-                out.push(self.mk(
-                    &format!("{prefix}HT002"),
-                    "Text hidden with inline CSS",
-                    "hidden-text",
-                    40 + boost,
-                    Some(line_of(i)),
-                    None,
-                    line,
-                    format!("Styled to be invisible when rendered{note}."),
-                ));
+            if self.det("HT002").re().is_match(line) {
+                out.push(self.found(&prefix, "HT002", boost, Some(line_of(i)), None, line, &note));
             }
-            if self.md_comment_re.is_match(line) && line.len() > 20 {
-                out.push(self.mk(
-                    &format!("{prefix}HT003"),
-                    "Markdown link-reference comment",
-                    "hidden-text",
-                    25 + boost,
-                    Some(line_of(i)),
-                    None,
-                    line,
-                    format!("`[x]: # (...)` lines do not render; they can carry hidden text{note}."),
-                ));
+            if self.det("HT003").re().is_match(line) && line.len() > 20 {
+                out.push(self.found(&prefix, "HT003", boost, Some(line_of(i)), None, line, &note));
             }
         }
 
@@ -458,41 +323,30 @@ impl Analyzer {
                     let decoded = text::b64_decode(s).and_then(|b| String::from_utf8(b).ok());
                     match decoded {
                         Some(d) if text::printable_ratio(&d) > 0.9 => {
-                            out.push(self.mk(
-                                &format!("{prefix}B64001"),
-                                "Base64-encoded text",
-                                "obfuscation",
-                                30 + boost,
+                            out.push(self.found(
+                                &prefix,
+                                "B64001",
+                                boost,
                                 Some(line_of(i)),
                                 Some(m.start() + 1),
                                 &format!("{} → {}", text::clip(s, 40), text::clip(&d, 120)),
-                                format!("Encoded text is unreadable to reviewers but trivially decoded by an agent{note}."),
+                                &note,
                             ));
                             self.analyze_into(&d, Some(("B64", line_of(i))), out, depth + 1);
                         }
-                        _ => out.push(self.mk(
-                            &format!("{prefix}B64002"),
-                            "Opaque encoded blob",
-                            "obfuscation",
-                            15 + boost,
+                        _ => out.push(self.found(
+                            &prefix,
+                            "B64002",
+                            boost,
                             Some(line_of(i)),
                             Some(m.start() + 1),
                             &text::clip(s, 60),
-                            format!("Long binary-looking blob in an instruction file{note}."),
+                            &note,
                         )),
                     }
                 }
-                if let Some(m) = self.hex_re.find(line) {
-                    out.push(self.mk(
-                        &format!("{prefix}HEX001"),
-                        "Hex-encoded payload",
-                        "obfuscation",
-                        20 + boost,
-                        Some(line_of(i)),
-                        Some(m.start() + 1),
-                        m.as_str(),
-                        format!("Long hex escape sequence{note}."),
-                    ));
+                if let Some(m) = self.det("HEX001").re().find(line) {
+                    out.push(self.found(&prefix, "HEX001", boost, Some(line_of(i)), Some(m.start() + 1), m.as_str(), &note));
                 }
             }
         }
@@ -509,66 +363,22 @@ impl Analyzer {
                 };
                 let host = strip_port(&hostport);
                 if userinfo.is_some() {
-                    out.push(self.mk(
-                        &format!("{prefix}URL005"),
-                        "URL with embedded user info",
-                        "obfuscation",
-                        30 + boost,
-                        Some(line_of(i)),
-                        col,
-                        line,
-                        format!("`user@host` URLs can disguise the real destination{note}."),
-                    ));
+                    out.push(self.found(&prefix, "URL005", boost, Some(line_of(i)), col, line, &note));
                 }
                 if is_ip(&host) && !is_loopback(&host) {
-                    out.push(self.mk(
-                        &format!("{prefix}URL002"),
-                        "URL to a raw IP address",
-                        "exfiltration",
-                        30 + boost,
-                        Some(line_of(i)),
-                        col,
-                        line,
-                        format!("Legitimate docs rarely point at bare IPs{note}."),
-                    ));
+                    out.push(self.found(&prefix, "URL002", boost, Some(line_of(i)), col, line, &note));
                     continue;
                 }
                 if host.starts_with("xn--") || host.contains(".xn--") {
-                    out.push(self.mk(
-                        &format!("{prefix}URL004"),
-                        "Punycode domain",
-                        "obfuscation",
-                        30 + boost,
-                        Some(line_of(i)),
-                        col,
-                        line,
-                        format!("Internationalized domains can impersonate well-known sites{note}."),
-                    ));
+                    out.push(self.found(&prefix, "URL004", boost, Some(line_of(i)), col, line, &note));
                 }
-                if self.shortener_re.is_match(&host) {
-                    out.push(self.mk(
-                        &format!("{prefix}URL003"),
-                        "URL shortener",
-                        "obfuscation",
-                        25 + boost,
-                        Some(line_of(i)),
-                        col,
-                        line,
-                        format!("Shorteners hide the real destination{note}."),
-                    ));
+                if self.det("URL003").re().is_match(&host) {
+                    out.push(self.found(&prefix, "URL003", boost, Some(line_of(i)), col, line, &note));
                     continue;
                 }
                 if !host.is_empty() && !self.is_trusted(&host) && seen_domains.insert(host.clone()) {
-                    out.push(self.mk(
-                        &format!("{prefix}URL001"),
-                        "Unknown domain",
-                        "network",
-                        8,
-                        Some(line_of(i)),
-                        col,
-                        &host,
-                        format!("Domain is not in analyzer.trusted_domains{note}."),
-                    ));
+                    let r = self.det("URL001");
+                    out.push(self.mk(&prefix, r, r.weight, Some(line_of(i)), col, &host, with_note(&r.reason, &note)));
                 }
             }
         }
@@ -623,51 +433,19 @@ impl Analyzer {
                 e.0 += 1;
             }
             for (id, (n, col)) in counts {
-                let (title, cat, w, why) = match id {
-                    "UC001" => (
-                        "Hidden Unicode tag characters",
-                        "hidden-text",
-                        85,
-                        "Tag characters are invisible but encode ASCII text that models read.",
-                    ),
-                    "UC002" => (
-                        "Bidirectional control characters",
-                        "hidden-text",
-                        50,
-                        "Bidi controls make the displayed text differ from what the agent reads (Trojan Source).",
-                    ),
-                    "UC003" => (
-                        "Zero-width / blank characters",
-                        "hidden-text",
-                        (30 + 5 * (n.saturating_sub(1) as u32)).min(60),
-                        "Invisible characters can split keywords to evade review or hide content.",
-                    ),
-                    "UC004" => (
-                        "Variation-selector payload",
-                        "hidden-text",
-                        60,
-                        "Unusual variation selectors can encode arbitrary hidden bytes.",
-                    ),
-                    "UC005" => (
-                        "Private-use characters",
-                        "obfuscation",
-                        15,
-                        "Private-use code points have no standard meaning.",
-                    ),
-                    _ => (
-                        "Control characters",
-                        "obfuscation",
-                        30,
-                        "Control characters (including ANSI escapes) can hide or rewrite terminal output.",
-                    ),
+                let r = self.det(id);
+                let w = if id == "UC003" {
+                    (r.weight + 5 * (n.saturating_sub(1) as u32)).min(r.weight_max)
+                } else {
+                    r.weight
                 };
                 let mut excerpt = line.to_string();
-                let mut reason = format!("{why} {n} on this line.");
+                let mut reason = format!("{} {n} on this line.", r.reason);
                 if id == "UC001" && !tag_text.is_empty() {
                     excerpt = format!("decoded hidden text: {tag_text}");
-                    reason = format!("{why} Decoded: \"{}\"", text::clip(&tag_text, 160));
+                    reason = format!("{} Decoded: \"{}\"", r.reason, text::clip(&tag_text, 160));
                 }
-                out.push(self.mk(&format!("{prefix}{id}"), title, cat, w, Some(ln), Some(col), &excerpt, reason));
+                out.push(self.mk(&prefix, r, w, Some(ln), Some(col), &excerpt, reason));
             }
             if !tag_text.is_empty() && depth < 2 {
                 self.analyze_into(&tag_text, Some(("TAG", ln)), out, depth + 1);
@@ -677,16 +455,8 @@ impl Analyzer {
                 let latin = word.chars().any(|c| c.is_ascii_alphabetic());
                 let foreign = word.chars().any(|c| matches!(c as u32, 0x0370..=0x052F));
                 if latin && foreign && word.chars().count() >= 3 {
-                    out.push(self.mk(
-                        &format!("{prefix}UC007"),
-                        "Mixed-script word (homoglyph)",
-                        "obfuscation",
-                        25,
-                        Some(ln),
-                        None,
-                        word,
-                        "Cyrillic/Greek look-alike letters inside a Latin word can evade keyword review.".into(),
-                    ));
+                    let r = self.det("UC007");
+                    out.push(self.mk(&prefix, r, r.weight, Some(ln), None, word, r.reason.clone()));
                     break;
                 }
             }
@@ -806,6 +576,37 @@ mod tests {
         let i = ids(&r);
         assert!(i.contains(&"SB001".to_string()));
         assert!(i.contains(&"SB002".to_string()));
+    }
+
+    #[test]
+    fn builtin_rule_file_loads() {
+        let (lines, detectors) = load_rules(BUILTIN).unwrap();
+        assert!(lines.iter().any(|r| r.id == "PI001"));
+        assert_eq!(lines.iter().filter(|r| r.credential).count(), 2);
+        assert_eq!(detectors.len(), DETECTORS.len());
+    }
+
+    #[test]
+    fn rule_file_errors() {
+        let bad = |src: String| load_rules(&src).err().unwrap();
+        let line = |id: &str, extra: &str| {
+            format!("{BUILTIN}\n[[line_rules]]\nid = \"{id}\"\ntitle = \"t\"\ncategory = \"c\"\nweight = 1\nreason = \"r\"\n{extra}\n")
+        };
+        assert!(bad(line("PI001", "pattern = 'x'")).contains("PI001: duplicate rule ID"));
+        assert!(bad(line("ZZ001", "")).contains("ZZ001: line rules need a pattern"));
+        assert!(bad(line("ZZ001", "pattern = '('")).contains("ZZ001: bad pattern"));
+        assert!(bad(line("ZZ001", "pattern = 'x'\nbogus = 1")).contains("unknown field"));
+        assert!(bad(BUILTIN.replace("id = \"URL005\"", "id = \"URL999\"")).contains("URL999: no detector with this ID"));
+        let without_hex_pattern = BUILTIN.replace("pattern = '''((\\\\x[0-9a-f]{2}){16,}|\\b[0-9a-f]{96,}\\b)'''", "");
+        assert_ne!(without_hex_pattern, BUILTIN);
+        assert!(bad(without_hex_pattern).contains("HEX001: pattern is required"));
+    }
+
+    #[test]
+    fn note_goes_before_final_period() {
+        assert_eq!(with_note("Bad thing.", " (in B64 on line 3)"), "Bad thing (in B64 on line 3).");
+        assert_eq!(with_note("Bad thing.", ""), "Bad thing.");
+        assert_eq!(with_note("No period", " (x)"), "No period (x)");
     }
 
     fn b64(data: &[u8]) -> String {
