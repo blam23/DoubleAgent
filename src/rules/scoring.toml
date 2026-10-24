@@ -1,0 +1,134 @@
+# Built-in provenance and shadow scoring rules, compiled into the binary.
+#
+# Each rule adds `points` to its `score` ("provenance" or "shadow") when `when`
+# is true. Each score is capped at 100. `reason` is shown in reports and can
+# use {name} placeholders for any fact. `doubleagent config rules` lists the
+# facts and functions, and prints the effective rule set.
+#
+# To change a rule without rebuilding, add a [[scoring.rules]] entry with the
+# same `id` to your config. To switch one off, list it in
+# scoring.disabled_rules.
+
+# ── Provenance: where the file came from ──────────────────────────────────
+
+[[rules]]
+id = "PROV001"
+score = "provenance"
+points = 35
+when = "in_dependency_dir"
+reason = "inside a dependency/vendor folder ({dependency_dir})"
+
+[[rules]]
+id = "PROV002"
+score = "provenance"
+points = 25
+# Dependency folders are normally gitignored; don't count that twice.
+when = "in_git && untracked && !in_dependency_dir"
+reason = "not tracked by git (planted or generated locally)"
+
+[[rules]]
+id = "PROV003"
+score = "provenance"
+points = 10
+when = "!in_git"
+reason = "not inside a git repository"
+
+[[rules]]
+id = "PROV004"
+score = "provenance"
+points = 5
+when = "in_git && !has_remote"
+reason = "repository has no origin remote"
+
+[[rules]]
+id = "PROV005"
+score = "provenance"
+points = 15
+when = "in_git && remote_untrusted"
+reason = "remote {remote} is not in provenance.trusted_remotes"
+
+[[rules]]
+id = "PROV006"
+score = "provenance"
+points = 60
+when = "location == \"downloads\""
+reason = "inside a Downloads folder"
+
+[[rules]]
+id = "PROV007"
+score = "provenance"
+points = 40
+when = "location == \"temp\""
+reason = "inside a temp folder"
+
+[[rules]]
+id = "PROV008"
+score = "provenance"
+points = 40
+when = "is_symlink"
+reason = "is a symlink to {symlink_target}"
+
+[[rules]]
+id = "PROV009"
+score = "provenance"
+points = 10
+when = "world_writable"
+reason = "world-writable"
+
+[[rules]]
+id = "PROV010"
+score = "provenance"
+points = 10
+when = "recently_modified && untrusted_location"
+reason = "appeared/changed within the last {recent_hours}h"
+
+[[rules]]
+id = "PROV011"
+score = "provenance"
+points = 25
+when = "pin_mismatch"
+reason = "content changed since it was hash-pinned"
+
+[[rules]]
+id = "PROV012"
+score = "provenance"
+points = 5
+when = "changed && untrusted_location"
+reason = "changed since the last scan"
+
+# ── Shadow: overriding other instruction files ────────────────────────────
+
+[[rules]]
+id = "SHAD001"
+score = "shadow"
+points = 10
+when = "has_parent"
+reason = "overrides parent instruction file {parent}"
+
+[[rules]]
+id = "SHAD002"
+score = "shadow"
+points = 15
+when = "is_override_file && has_siblings"
+reason = "is an explicit override file next to another instruction file"
+
+[[rules]]
+id = "SHAD003"
+score = "shadow"
+points = 60
+when = "shadows && finding(\"PI001\", \"PI004\", \"PI005\")"
+reason = "uses language that discards or supersedes other instructions"
+
+[[rules]]
+id = "SHAD004"
+score = "shadow"
+points = 25
+when = "has_trusted_parent && untrusted_location"
+reason = "untrusted file shadows trusted parent {trusted_parent}"
+
+[[rules]]
+id = "SHAD005"
+score = "shadow"
+points = 20
+when = "has_parent && content >= parent_content + 30"
+reason = "much riskier than its parent(s) (content {content} vs {parent_content})"

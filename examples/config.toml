@@ -1,0 +1,129 @@
+# DoubleAgent configuration. Every value shown is the default.
+
+[scan]
+roots = []
+filenames = [
+    "AGENTS.md",
+    "AGENTS.override.md",
+    "AGENT.md",
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+    "GEMINI.md",
+    ".cursorrules",
+    ".windsurfrules",
+    ".clinerules",
+    ".goosehints",
+    "copilot-instructions.md",
+]
+patterns = [
+    "**/.cursor/rules/*.mdc",
+    "**/.cursor/rules/*.md",
+    "**/.clinerules/*.md",
+    "**/.windsurf/rules/*.md",
+    "**/.github/instructions/*.instructions.md",
+    "**/.github/prompts/*.prompt.md",
+    "**/.claude/commands/*.md",
+    "**/.claude/agents/*.md",
+]
+exclude_dirs = [
+    ".git",
+    "$recycle.bin",
+    "system volume information",
+    ".trash",
+    ".cache",
+    "target",
+    ".doubleagent-quarantine",
+]
+exclude_globs = []
+max_file_size = 262144
+follow_symlinks = false
+skip_network_mounts = true
+skip_cloud_placeholders = true
+threads = 0
+
+[analyzer]
+trusted_domains = [
+    "github.com",
+    "githubusercontent.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "docs.rs",
+    "crates.io",
+    "rust-lang.org",
+    "npmjs.com",
+    "pypi.org",
+    "python.org",
+    "go.dev",
+    "golang.org",
+    "nodejs.org",
+    "mozilla.org",
+    "microsoft.com",
+    "apple.com",
+    "google.com",
+    "anthropic.com",
+    "openai.com",
+    "stackoverflow.com",
+    "wikipedia.org",
+    "readthedocs.io",
+    "example.com",
+    "localhost",
+]
+base64_min_len = 120
+disabled_rules = []
+
+[provenance]
+dependency_dirs = [
+    "node_modules",
+    "bower_components",
+    ".pnpm-store",
+    ".yarn",
+    ".venv",
+    "venv",
+    "site-packages",
+    "dist-packages",
+    "__pypackages__",
+    ".tox",
+    ".nox",
+    "vendor",
+    "third_party",
+    "third-party",
+    ".cargo",
+    ".rustup",
+    ".gradle",
+    ".m2",
+    "pods",
+    "elm-stuff",
+    ".nuget",
+]
+trusted_remotes = []
+recent_hours = 24
+use_git = true
+
+[scoring]
+disabled_rules = []
+rules = []
+
+[scoring.combine]
+provenance_pct = 50
+shadow_pct = 60
+amplify_min_content = 20
+amplify_pct = 25
+amplify_cap = 20
+
+[policy]
+hook_command = []
+
+[policy.thresholds]
+low = 20
+medium = 40
+high = 65
+critical = 85
+
+[watch]
+debounce_ms = 1500
+reconcile_minutes = 15
+force_polling = false
+poll_interval_secs = 30
+
+[output]
+webhook_min_severity = "high"
