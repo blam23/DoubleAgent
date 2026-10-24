@@ -1,6 +1,7 @@
 //! DoubleAgent: rogue AGENTS.md sentinel.
 
 mod analyzer;
+mod atlas;
 mod config;
 mod engine;
 mod enrich;
@@ -247,6 +248,10 @@ fn print_scoring_rules(cfg: &Config) -> Result<()> {
     println!("# Operators: || && ! == != < <= > >= + -");
     println!();
     println!("# Rules in effect. Copy one into your config and edit it to override it by ID.");
+    println!(
+        "# ATLAS technique IDs use release {}. An empty `atlas` list means no direct technique mapping.",
+        atlas::VERSION
+    );
     println!();
     let rules = score::effective_rules(&cfg.scoring)?;
     print!("{}", toml::to_string_pretty(&Wrapper { scoring: Rules { rules } })?);

@@ -210,6 +210,9 @@ pub enum ScoreKind {
 #[serde(deny_unknown_fields)]
 pub struct ScoringRule {
     pub id: String,
+    /// MITRE ATLAS technique IDs associated with this scoring behavior, if any.
+    #[serde(default)]
+    pub atlas: Vec<String>,
     /// Which score the points go to.
     pub score: ScoreKind,
     /// Added when `when` is true. Negative points lower the score (never below 0).

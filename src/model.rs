@@ -69,6 +69,9 @@ impl std::fmt::Display for Severity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule_id: String,
+    /// MITRE ATLAS technique IDs associated with the finding; empty when no direct mapping applies.
+    #[serde(default)]
+    pub atlas: Vec<String>,
     pub title: String,
     pub category: String,
     /// Contribution to the static score (0-100).

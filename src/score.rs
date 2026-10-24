@@ -37,6 +37,7 @@ pub const FACTS: &[(&str, Ty, &str)] = &[
     ("untrusted_location", Ty::Bool, "in a dependency folder, untracked, or outside git"),
     ("pin_mismatch", Ty::Bool, "hash-pinned, but the content no longer matches"),
     ("changed", Ty::Bool, "content changed since the last scan"),
+    ("changes_7d", Ty::Int, "distinct content revisions observed in the last 7 days"),
     ("file_name", Ty::Str, "file name, e.g. AGENTS.override.md"),
     ("is_override_file", Ty::Bool, "file name contains \"override\""),
     ("has_siblings", Ty::Bool, "other instruction files in the same folder"),
@@ -84,6 +85,8 @@ pub struct Subject<'a> {
     pub pin_mismatch: bool,
     /// Changed since a previous scan (false on first sight).
     pub changed: bool,
+    /// Distinct content revisions observed in the previous seven days, including this scan's change.
+    pub changes_7d: u32,
 }
 
 pub struct Facts {
@@ -123,6 +126,7 @@ impl Facts {
             ("untrusted_location", Value::Bool(untrusted_location)),
             ("pin_mismatch", Value::Bool(s.pin_mismatch)),
             ("changed", Value::Bool(s.changed)),
+            ("changes_7d", Value::Int(s.changes_7d as i64)),
             ("file_name", Value::Str(s.file_name.to_string())),
             ("is_override_file", Value::Bool(is_override_file)),
             ("has_siblings", Value::Bool(has_siblings)),
@@ -194,6 +198,7 @@ impl Template {
 
 struct Compiled {
     id: String,
+    atlas: Vec<String>,
     kind: ScoreKind,
     points: i32,
     when: Expr,
@@ -238,7 +243,13 @@ pub fn effective_rules(cfg: &ScoringConfig) -> Result<Vec<ScoringRule>> {
             ..r.clone()
         };
         match rules.iter_mut().find(|b| b.id == id) {
-            Some(b) => *b = r,
+            Some(b) => {
+                let r = ScoringRule {
+                    atlas: if r.atlas.is_empty() { b.atlas.clone() } else { r.atlas },
+                    ..r
+                };
+                *b = r;
+            }
             None => rules.push(r),
         }
     }
@@ -257,10 +268,16 @@ impl RuleSet {
         let rules = effective_rules(cfg)?
             .into_iter()
             .map(|r| {
+                for id in &r.atlas {
+                    if !crate::atlas::is_known_technique(id) {
+                        bail!("scoring rule {}: unknown MITRE ATLAS technique {id}", r.id);
+                    }
+                }
                 let when = Expr::compile(&r.when, &fact_type).with_context(|| format!("scoring rule {}: bad `when`", r.id))?;
                 let reason = Template::compile(&r.reason).with_context(|| format!("scoring rule {}", r.id))?;
                 Ok(Compiled {
                     id: r.id,
+                    atlas: r.atlas,
                     kind: r.score,
                     points: r.points,
                     when,
@@ -281,7 +298,12 @@ impl RuleSet {
             let mut reasons = Vec::new();
             for r in self.rules.iter().filter(|r| r.kind == kind && r.when.eval(f)) {
                 total = total.saturating_add(r.points);
-                reasons.push(format!("{:+} {} [{}]", r.points, r.reason.render(f), r.id));
+                let atlas = if r.atlas.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (ATLAS {})", r.atlas.join(", "))
+                };
+                reasons.push(format!("{:+} {} [{}]{atlas}", r.points, r.reason.render(f), r.id));
             }
             Scored {
                 score: total.clamp(0, 100) as u32,
@@ -326,6 +348,7 @@ mod tests {
             parents,
             pin_mismatch: false,
             changed: false,
+            changes_7d: 0,
         }))
     }
 
@@ -352,6 +375,7 @@ mod tests {
             parents: &[],
             pin_mismatch: false,
             changed: false,
+            changes_7d: 0,
         });
         let names: Vec<&str> = FACTS.iter().map(|(n, _, _)| *n).collect();
         let mut keys: Vec<&str> = f.values.keys().copied().collect();
@@ -406,6 +430,26 @@ mod tests {
     }
 
     #[test]
+    fn repeated_recent_content_changes_raise_provenance() {
+        let rs = defaults();
+        let cfg = ProvenanceConfig::default();
+        let ctx = Context::default();
+        let facts = Facts::new(&Subject {
+            ctx: &ctx,
+            cfg: &cfg,
+            file_name: "AGENTS.md",
+            content: 0,
+            findings: &[],
+            parents: &[],
+            pin_mismatch: false,
+            changed: false,
+            changes_7d: 3,
+        });
+        let (p, _) = rs.evaluate(&facts);
+        assert!(p.reasons.iter().any(|r| r.contains("[PROV014]")));
+    }
+
+    #[test]
     fn config_overrides_disables_and_adds() {
         let cfg: ScoringConfig = toml::from_str(
             r#"
@@ -422,10 +466,18 @@ mod tests {
             points = -20
             when = "contains(remote, \"github.com/myorg/\")"
             reason = "our org"
+            [[rules]]
+            id = "SHAD003"
+            score = "shadow"
+            points = 1
+            when = "false"
+            reason = "override"
             "#,
         )
         .unwrap();
         let rs = RuleSet::new(&cfg).unwrap();
+        let inherited = effective_rules(&cfg).unwrap().into_iter().find(|r| r.id == "SHAD003").unwrap();
+        assert_eq!(inherited.atlas, ["AML.T0051.001"]);
         let ctx = Context {
             dependency_dir: Some("vendor".into()),
             git_remote: Some("https://GitHub.com/MyOrg/x".into()),

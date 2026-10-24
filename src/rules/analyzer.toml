@@ -5,6 +5,7 @@
 # expressions (Rust `regex` syntax), always matched case-insensitively.
 # Rule weights are 0-100; a file's content score is its highest finding
 # weight plus a quarter of every other finding's, capped at 100.
+# `atlas` lists directly related MITRE ATLAS v2026.09 technique IDs; [] means no direct mapping.
 #
 # When a rule fires inside decoded hidden content (Unicode tag characters or
 # base64), its ID gets a TAG: or B64: prefix and its weight goes up by 10.
@@ -19,6 +20,7 @@
 
 [[line_rules]]
 id = "PI001"
+atlas = ["AML.T0051.001"]
 title = "Override of previous instructions"
 category = "prompt-injection"
 weight = 45
@@ -27,6 +29,7 @@ pattern = '''\b(ignore|disregard|forget|override|bypass)\s+(all\s+|any\s+)?(of\s
 
 [[line_rules]]
 id = "PI002"
+atlas = ["AML.T0051.001"]
 title = "Conceal actions from the user"
 category = "deception"
 weight = 40
@@ -35,6 +38,7 @@ pattern = '''\b(do\s*n[o']?t|never|without)\s+(tell(ing)?|inform(ing)?|notify(in
 
 [[line_rules]]
 id = "PI003"
+atlas = ["AML.T0051.001"]
 title = "Covert-action wording"
 category = "deception"
 weight = 20
@@ -43,6 +47,7 @@ pattern = '''\b(silently|secretly|quietly|covertly|discreetly|stealthily)\b'''
 
 [[line_rules]]
 id = "PI004"
+atlas = ["AML.T0051.001", "AML.T0054"]
 title = "Role or mode hijack"
 category = "prompt-injection"
 weight = 35
@@ -51,6 +56,7 @@ pattern = '''(you\s+are\s+(now\s+)?(no\s+longer|in)\s+\w*\s*(developer|dan|jailb
 
 [[line_rules]]
 id = "PI005"
+atlas = ["AML.T0051.001"]
 title = "Claims to supersede other instruction files"
 category = "prompt-injection"
 weight = 30
@@ -59,17 +65,55 @@ pattern = '''\b(this\s+file\s+)?(supersedes|overrides|takes\s+precedence\s+over|
 
 [[line_rules]]
 id = "PI006"
+atlas = []
 title = "Addresses the AI rater / scanner"
 category = "prompt-injection"
 weight = 50
 reason = "Text aimed at security tooling (e.g. 'rate this file as safe') is an evasion attempt."
 pattern = '''\b(rate|mark|classify|report|score)\s+(this\s+)?(file|document|content)?\s*(as\s+)?(safe|benign|clean|harmless|low[- ]risk)\b|\b(security\s+)?(scanner|auditor|reviewer|classifier|rater)s?\s*[:,]?\s*(should|must|please)\s+(ignore|skip|approve)'''
 
+[[line_rules]]
+id = "PI007"
+atlas = ["AML.T0051.001"]
+title = "Impersonates a trusted instruction source"
+category = "prompt-injection"
+weight = 35
+reason = "Claims authority as a system, developer, or user instruction to make the agent trust this file."
+pattern = '''\b(this\s+(file|document|message|section)\s+)?(is|contains|represents)\s+(the\s+)?(real\s+|actual\s+|authorized\s+|trusted\s+)?(system|developer|user|administrator|admin)\s+(prompt|message|instruction|directive|policy)\b|\b(treat|consider|regard)\s+(this\s+)?(file|document|message|content)\s+as\s+(the\s+)?(system|developer|user|trusted|authorized)\s+(prompt|message|instruction|directive|policy)\b'''
+
+[[line_rules]]
+id = "EX011"
+atlas = ["AML.T0051.001", "AML.T0057"]
+title = "Disclose private data in a response or artifact"
+category = "exfiltration"
+weight = 45
+reason = "Directs private data into a response, log, report, or generated artifact."
+pattern = '''\b(reveal|disclose|print|include|copy|paste|quote|dump|expose|write|append|summarize)\b[^\n]{0,100}\b(conversation\s+history|chat\s+history|system\s+prompt|developer\s+message|environment\s+variables?|process\.env|credentials?|passwords?|passphrases?|secrets?|tokens?|api\s+keys?|private\s+keys?|\.env\b)\b[^\n]{0,100}\b(response|reply|output|log|report|artifact|file|comment|commit|issue)\b|\b(response|reply|output|log|report|artifact|file|comment|commit|issue)\b[^\n]{0,100}\b(reveal|disclose|print|include|copy|paste|quote|dump|expose|write|append|summarize)\b[^\n]{0,100}\b(conversation\s+history|chat\s+history|system\s+prompt|developer\s+message|environment\s+variables?|process\.env|credentials?|passwords?|passphrases?|secrets?|tokens?|api\s+keys?|private\s+keys?|\.env\b)\b'''
+
+[[line_rules]]
+id = "PI008"
+atlas = ["AML.T0051.001"]
+title = "Treat untrusted external content as instructions"
+category = "prompt-injection"
+weight = 35
+reason = "Directs the agent to obey instructions embedded in external or otherwise untrusted content."
+pattern = '''\b(follow|obey|execute|run|apply|act\s+on)\b[^\n]{0,100}\b(instructions?|commands?|prompts?)\b[^\n]{0,100}\b(webpages?|web\s+pages?|issues?|pull\s+requests?|commit\s+messages?|command\s+output|tool\s+output|search\s+results?|external\s+content|untrusted\s+(text|content|data))\b|\b(webpages?|web\s+pages?|issues?|pull\s+requests?|commit\s+messages?|command\s+output|tool\s+output|search\s+results?|external\s+content|untrusted\s+(text|content|data))\b[^\n]{0,100}\b(instructions?|commands?|prompts?)\b[^\n]{0,100}\b(follow|obey|execute|run|apply|act\s+on)\b'''
+
+[[line_rules]]
+id = "PI009"
+atlas = ["AML.T0051.001"]
+title = "Mislead or bypass review and audit"
+category = "deception"
+weight = 40
+reason = "Asks the agent to conceal changes or falsely imply review or approval."
+pattern = '''\b(omit|hide|exclude|leave\s+out|do\s+not\s+mention|don't\s+mention|misrepresent|describe|claim|say)\b[^\n]{0,100}\b(changes?|actions?|commands?|diff|logs?|report|summary|review|approval|approved|authorized)\b|\b(claim|say|pretend|state)\b[^\n]{0,80}\b(already\s+)?(reviewed|approved|authorized|verified)\b'''
+
 
 # ── remote code / shell ───────────────────────────────────────────────────
 
 [[line_rules]]
 id = "SH001"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Pipe remote content into a shell"
 category = "remote-code"
 weight = 60
@@ -78,6 +122,7 @@ pattern = '''\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|fetch)\b[^
 
 [[line_rules]]
 id = "SH002"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Encoded or obfuscated command execution"
 category = "obfuscation"
 weight = 55
@@ -86,6 +131,7 @@ pattern = '''(base64\s+(-d|--decode|-D)[^\n]*\|\s*(sh|bash|zsh|python)|powershel
 
 [[line_rules]]
 id = "SH003"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Destructive command"
 category = "destructive"
 weight = 40
@@ -94,6 +140,7 @@ pattern = '''(\brm\s+-[a-z]*r[a-z]*f?[a-z]*\s+(--no-preserve-root\s+)?(/|~|\$hom
 
 [[line_rules]]
 id = "SH004"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Download then execute a binary"
 category = "remote-code"
 weight = 45
@@ -102,6 +149,7 @@ pattern = '''\b(curl|wget|invoke-webrequest|iwr)\b[^\n]*(\s-o\s|\s-O\b|--output|
 
 [[line_rules]]
 id = "SH005"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Persistence mechanism"
 category = "persistence"
 weight = 30
@@ -110,6 +158,7 @@ pattern = '''(\bcrontab\b|\bschtasks\b|launchctl\s+(load|bootstrap)|LaunchAgents
 
 [[line_rules]]
 id = "SH006"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Reverse shell or listener"
 category = "remote-code"
 weight = 70
@@ -118,6 +167,7 @@ pattern = '''(\bnc\s+(-[a-z]*e|-[a-z]*c)\s|\bncat\b[^\n]*-e\s|/dev/tcp/|bash\s+-
 
 [[line_rules]]
 id = "SH007"
+atlas = ["AML.T0050", "AML.T0051.001", "AML.T0054"]
 title = "Privilege escalation"
 category = "safety-bypass"
 weight = 25
@@ -126,6 +176,7 @@ pattern = '''(\bsudo\s+(-s|su|-i|chmod|chown|rm|bash)|\bchmod\s+(-r\s+)?(777|a\+
 
 [[line_rules]]
 id = "SH008"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Install from an unpinned or non-registry source"
 category = "supply-chain"
 weight = 25
@@ -137,6 +188,7 @@ pattern = '''(\b(pip|pip3)\s+install\s+[^\n]*(https?://|git\+)|\bnpm\s+(i|instal
 
 [[line_rules]]
 id = "EX001"
+atlas = ["AML.T0083", "AML.T0098"]
 title = "Reference to credentials or key material"
 category = "credential-access"
 weight = 35
@@ -146,6 +198,7 @@ pattern = '''(~?/?\.ssh\b|\bid_(rsa|ed25519|ecdsa|dsa)\b|\.aws/credentials|\.aws
 
 [[line_rules]]
 id = "EX002"
+atlas = ["AML.T0083"]
 title = "Reference to .env / environment secrets"
 category = "credential-access"
 weight = 20
@@ -155,6 +208,7 @@ pattern = '''((^|[\s'`(/\\])\.env(\.[a-z]+)?\b|\bprintenv\b|\benv\s*[|>]|\bset\s
 
 [[line_rules]]
 id = "EX003"
+atlas = ["AML.T0025", "AML.T0057"]
 title = "Send data to a remote destination"
 category = "exfiltration"
 weight = 45
@@ -163,6 +217,7 @@ pattern = '''\b(send|upload|post|exfiltrate|transmit|forward|leak|beacon|sync|co
 
 [[line_rules]]
 id = "EX004"
+atlas = ["AML.T0025"]
 title = "Known exfiltration / interception endpoint"
 category = "exfiltration"
 weight = 55
@@ -171,6 +226,7 @@ pattern = '''(pastebin\.com|paste\.ee|hastebin|transfer\.sh|file\.io|0x0\.st|ngr
 
 [[line_rules]]
 id = "EX005"
+atlas = ["AML.T0025"]
 title = "Archive or encode the project for transfer"
 category = "exfiltration"
 weight = 25
@@ -182,6 +238,7 @@ pattern = '''\b(tar|zip|7z|compress-archive)\b[^\n]{0,60}(~|\$home|%userprofile%
 
 [[line_rules]]
 id = "SB001"
+atlas = ["AML.T0051.001", "AML.T0054"]
 title = "Disable approvals or sandboxing"
 category = "safety-bypass"
 weight = 55
@@ -190,6 +247,7 @@ pattern = '''(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-
 
 [[line_rules]]
 id = "SB002"
+atlas = ["AML.T0051.001", "AML.T0054"]
 title = "Auto-approve or act without confirmation"
 category = "safety-bypass"
 weight = 30
@@ -198,6 +256,7 @@ pattern = '''\b(auto[- ]?approve|always\s+(allow|approve|accept|say\s+yes)|witho
 
 [[line_rules]]
 id = "CF001"
+atlas = ["AML.T0081"]
 title = "Modify agent configuration or MCP servers"
 category = "agent-config-tamper"
 weight = 40
@@ -206,6 +265,7 @@ pattern = '''(\.claude/settings(\.local)?\.json|\.codex/config\.toml|\.cursor/mc
 
 [[line_rules]]
 id = "CF002"
+atlas = ["AML.T0051.001", "AML.T0081"]
 title = "Write to other agent instruction files"
 category = "agent-config-tamper"
 weight = 30
@@ -214,6 +274,7 @@ pattern = '''\b(write|modify|edit|update|append|overwrite|create|copy)\b[^\n]{0,
 
 [[line_rules]]
 id = "CF003"
+atlas = ["AML.T0050", "AML.T0051.001"]
 title = "Tamper with git safety"
 category = "agent-config-tamper"
 weight = 25
@@ -231,6 +292,7 @@ pattern = '''(git\s+push\s+[^\n]*(--force\b|-f\b)|git\s+config\s+--global|core\.
 
 [[detectors]]
 id = "EX010"
+atlas = ["AML.T0057"]
 title = "Credential access combined with network transfer"
 category = "exfiltration"
 weight = 75
@@ -240,6 +302,7 @@ reason = "A credential/secret reference sits within two lines of a network comma
 
 [[detectors]]
 id = "HT001"
+atlas = ["AML.T0051.001", "AML.T0068"]
 title = "Instructions hidden in an HTML comment"
 category = "hidden-text"
 weight = 35
@@ -248,6 +311,7 @@ reason = "HTML comments are invisible when the markdown is rendered but agents s
 
 [[detectors]]
 id = "HT002"
+atlas = ["AML.T0068"]
 title = "Text hidden with inline CSS"
 category = "hidden-text"
 weight = 40
@@ -256,6 +320,7 @@ pattern = '''<[a-z][^>]*style\s*=\s*["'][^"']*(display\s*:\s*none|visibility\s*:
 
 [[detectors]]
 id = "HT003"
+atlas = ["AML.T0068"]
 title = "Markdown link-reference comment"
 category = "hidden-text"
 weight = 25
@@ -266,6 +331,7 @@ pattern = '''^\s*\[[^\]]*\]:\s*(#|<>)\s*[\(\x22']'''
 
 [[detectors]]
 id = "UC001"
+atlas = ["AML.T0068"]
 title = "Hidden Unicode tag characters"
 category = "hidden-text"
 weight = 85
@@ -273,6 +339,7 @@ reason = "Tag characters are invisible but encode ASCII text that models read."
 
 [[detectors]]
 id = "UC002"
+atlas = ["AML.T0068"]
 title = "Bidirectional control characters"
 category = "hidden-text"
 weight = 50
@@ -280,6 +347,7 @@ reason = "Bidi controls make the displayed text differ from what the agent reads
 
 [[detectors]]
 id = "UC003"
+atlas = ["AML.T0068"]
 title = "Zero-width / blank characters"
 category = "hidden-text"
 weight = 30
@@ -288,6 +356,7 @@ reason = "Invisible characters can split keywords to evade review or hide conten
 
 [[detectors]]
 id = "UC004"
+atlas = ["AML.T0068"]
 title = "Variation-selector payload"
 category = "hidden-text"
 weight = 60
@@ -295,6 +364,7 @@ reason = "Unusual variation selectors can encode arbitrary hidden bytes."
 
 [[detectors]]
 id = "UC005"
+atlas = []
 title = "Private-use characters"
 category = "obfuscation"
 weight = 15
@@ -302,6 +372,7 @@ reason = "Private-use code points have no standard meaning."
 
 [[detectors]]
 id = "UC006"
+atlas = ["AML.T0068"]
 title = "Control characters"
 category = "obfuscation"
 weight = 30
@@ -309,6 +380,7 @@ reason = "Control characters (including ANSI escapes) can hide or rewrite termin
 
 [[detectors]]
 id = "UC007"
+atlas = ["AML.T0068"]
 title = "Mixed-script word (homoglyph)"
 category = "obfuscation"
 weight = 25
@@ -318,6 +390,7 @@ reason = "Cyrillic/Greek look-alike letters inside a Latin word can evade keywor
 
 [[detectors]]
 id = "B64001"
+atlas = ["AML.T0068"]
 title = "Base64-encoded text"
 category = "obfuscation"
 weight = 30
@@ -325,6 +398,7 @@ reason = "Encoded text is unreadable to reviewers but trivially decoded by an ag
 
 [[detectors]]
 id = "B64002"
+atlas = []
 title = "Opaque encoded blob"
 category = "obfuscation"
 weight = 15
@@ -332,6 +406,7 @@ reason = "Long binary-looking blob in an instruction file."
 
 [[detectors]]
 id = "HEX001"
+atlas = ["AML.T0068"]
 title = "Hex-encoded payload"
 category = "obfuscation"
 weight = 20
@@ -342,6 +417,7 @@ pattern = '''((\\x[0-9a-f]{2}){16,}|\b[0-9a-f]{96,}\b)'''
 
 [[detectors]]
 id = "URL001"
+atlas = []
 title = "Unknown domain"
 category = "network"
 weight = 8
@@ -349,6 +425,7 @@ reason = "Domain is not in analyzer.trusted_domains."
 
 [[detectors]]
 id = "URL002"
+atlas = []
 title = "URL to a raw IP address"
 category = "exfiltration"
 weight = 30
@@ -356,6 +433,7 @@ reason = "Legitimate docs rarely point at bare IPs."
 
 [[detectors]]
 id = "URL003"
+atlas = []
 title = "URL shortener"
 category = "obfuscation"
 weight = 25
@@ -364,6 +442,7 @@ pattern = '''^(bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|ow\.ly|buff\.ly|rebrand
 
 [[detectors]]
 id = "URL004"
+atlas = []
 title = "Punycode domain"
 category = "obfuscation"
 weight = 30
@@ -371,6 +450,7 @@ reason = "Internationalized domains can impersonate well-known sites."
 
 [[detectors]]
 id = "URL005"
+atlas = []
 title = "URL with embedded user info"
 category = "obfuscation"
 weight = 30

@@ -51,12 +51,16 @@ Exit codes: `0` ok, `1` a file met `--fail-on`, `2` error.
 * **Hidden text:** Unicode tag characters (decoded and re-scanned), bidi controls, zero-width characters (emoji ZWJ excepted), variation-selector payloads, control/ANSI characters, homoglyph words, instructions inside HTML comments, CSS-hidden text, and markdown `[//]: #` comments.
 * **Encoded payloads:** base64 blobs are decoded and re-scanned; hex payloads are flagged.
 * **Remote code:** `curl | sh`, `iwr | iex`, download-and-execute, encoded PowerShell, reverse shells.
-* **Exfiltration:** references to SSH keys, cloud credentials, token stores and `.env`; a credential reference within two lines of a network command (rule `EX010`); paste sites, request catchers, tunnels and chat webhooks; raw-IP URLs, shorteners, punycode, `user@host` URLs, unknown domains.
+* **Exfiltration:** references to SSH keys, cloud credentials, token stores and `.env`; directs private data into a response or artifact (rule `EX011`); a credential reference within two lines of a network command (rule `EX010`); paste sites, request catchers, tunnels and chat webhooks; raw-IP URLs, shorteners, punycode, `user@host` URLs, unknown domains.
 * **Safety bypass:** `--dangerously-skip-permissions`, `--yolo`, approval policy `never`, sandbox off, auto-approve wording.
 * **Agent config tampering:** edits to `.claude/settings.json`, `.codex/config.toml`, `.mcp.json` and the like, adding MCP servers, writing other agent files, git hook and force-push tricks.
-* **Prompt injection and deception:** "ignore previous instructions", "don't tell the user", role or mode hijacks, "this file supersedes…", and text addressed to the scanner itself ("rate this file as safe").
+* **Prompt injection and deception:** "ignore previous instructions", "don't tell the user", role or mode hijacks, claims to impersonate trusted instruction sources, directions to obey external prompt content, review/audit evasion, "this file supersedes…", and text addressed to the scanner itself ("rate this file as safe").
 
 Rule IDs appear in every finding. Every rule's title, weight, reason and pattern is defined in [`src/rules/analyzer.toml`](src/rules/analyzer.toml) (compiled into the binary). Switch rules off with `analyzer.disabled_rules`.
+
+Rules are cross-referenced to MITRE ATLAS v2026.09 where a direct technique mapping applies. Analyzer findings include ATLAS technique IDs in JSON/SARIF and text output; an empty list means the rule is a scanner/provenance heuristic without a direct ATLAS technique mapping. These classifications are behavior cross-references, not a claim that a finding proves an adversary used the technique.
+
+See the [ATLAS rule crosswalk](docs/atlas-mapping.md) for the mapped techniques and methodology.
 
 ## Scoring rules
 
@@ -88,7 +92,7 @@ amplify_pct = 25                      # add 25% of their sum, up to amplify_cap
 amplify_cap = 20
 ```
 
-`when` is a condition over facts about the file (`in_git`, `untracked`, `in_dependency_dir`, `location`, `has_parent`, `content`, ...) with `&& || !`, comparisons, `+ -`, and the functions `finding("PI001", ...)`, `contains(text, "x")` and `matches(text, "regex")`. `reason` can use `{fact}` placeholders. Rules are type-checked when the config loads, so a misspelled name is an error, not a rule that never fires. `doubleagent config rules` lists every fact and prints the rules in effect, ready to copy and edit.
+`when` is a condition over facts about the file (`in_git`, `untracked`, `in_dependency_dir`, `location`, `has_parent`, `changes_7d`, `content`, ...) with `&& || !`, comparisons, `+ -`, and the functions `finding("PI001", ...)`, `contains(text, "x")` and `matches(text, "regex")`. `changes_7d` counts content revisions observed in the prior seven days; repeat scans of unchanged content do not count. `reason` can use `{fact}` placeholders. Rules are type-checked when the config loads, so a misspelled name is an error, not a rule that never fires. `doubleagent config rules` lists every fact and prints the rules in effect, ready to copy and edit.
 
 ## Allow rules and hash pins
 

@@ -82,7 +82,7 @@ Three scores combine into a final severity:
 | Score | Source |
 |---|---|
 | Content risk | Static analyzer findings |
-| Provenance risk | Context enricher (untracked, in dependencies, unknown remote, recently appeared) |
+| Provenance risk | Context enricher and stored history (untracked, in dependencies, unknown remote, recent changes, repeated content revisions) |
 | Shadow risk | Overrides or contradicts a trusted parent file |
 
 Provenance and shadow are computed by a small rule engine: each rule is an ID, a target score, points, a type-checked condition over facts about the file, and a reason template. Built-in rules ship as data (`src/rules/scoring.toml`). The config can disable, replace or add rules and tune the combine weights (`[scoring]`), without a rebuild.

@@ -66,6 +66,13 @@ impl Store {
              CREATE TABLE IF NOT EXISTS files(
                path TEXT PRIMARY KEY, file_id TEXT, size INTEGER, mtime INTEGER, sha256 TEXT,
                first_seen TEXT, last_seen TEXT, last_severity TEXT, last_score INTEGER, present INTEGER DEFAULT 1);
+             CREATE TABLE IF NOT EXISTS content_revisions(
+               id INTEGER PRIMARY KEY, path TEXT NOT NULL, sha256 TEXT NOT NULL, ts TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS content_revisions_path ON content_revisions(path, id);
+             INSERT INTO content_revisions(path,sha256,ts)
+               SELECT f.path,f.sha256,f.last_seen FROM files f
+               WHERE f.sha256 IS NOT NULL AND NOT EXISTS(
+                 SELECT 1 FROM content_revisions c WHERE c.path=f.path);
              CREATE TABLE IF NOT EXISTS verdicts(
                id INTEGER PRIMARY KEY, path TEXT, sha256 TEXT, ts TEXT, severity TEXT, score INTEGER, report TEXT);
              CREATE INDEX IF NOT EXISTS verdicts_path ON verdicts(path, id);
@@ -122,6 +129,16 @@ impl Store {
     pub fn record_report(&self, r: &Report, file_id: &str, mtime: i64) -> Result<()> {
         let ts = &r.scanned_at;
         let p = key(&r.path);
+        let previous_hash: Option<String> = self
+            .conn
+            .query_row("SELECT sha256 FROM files WHERE path=?1", params![p], |row| row.get(0))
+            .optional()?;
+        if previous_hash.as_deref() != Some(&r.sha256) {
+            self.conn.execute(
+                "INSERT INTO content_revisions(path,sha256,ts) VALUES(?1,?2,?3)",
+                params![p, r.sha256, ts],
+            )?;
+        }
         self.conn.execute(
             "INSERT INTO files(path,file_id,size,mtime,sha256,first_seen,last_seen,last_severity,last_score,present)
              VALUES(?1,?2,?3,?4,?5,?6,?6,?7,?8,1)
@@ -194,6 +211,25 @@ impl Store {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as u32))
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Count distinct content revisions observed since an RFC3339 cutoff.
+    /// Repeated verdicts for the same hash do not count as changes.
+    pub fn content_changes_since(&self, path: &Path, cutoff: &str) -> Result<u32> {
+        let mut st = self
+            .conn
+            .prepare("SELECT ts, sha256 FROM content_revisions WHERE path=?1 ORDER BY id")?;
+        let rows = st.query_map(params![key(path)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut previous: Option<String> = None;
+        let mut changes = 0u32;
+        for row in rows {
+            let (ts, sha256) = row?;
+            if previous.as_ref().is_some_and(|p| p != &sha256) && ts.as_str() >= cutoff {
+                changes = changes.saturating_add(1);
+            }
+            previous = Some(sha256);
+        }
+        Ok(changes)
     }
 
     // ---------- allow rules ----------
@@ -328,4 +364,32 @@ fn chain_hash(prev: &str, ts: &str, action: &str, detail: &str) -> String {
         h.update(part.as_bytes());
     }
     hex::encode(h.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_content_changes_ignore_repeated_hashes_and_old_revisions() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE content_revisions(id INTEGER PRIMARY KEY, path TEXT, ts TEXT, sha256 TEXT)",
+            [],
+        )
+        .unwrap();
+        for (ts, hash) in [
+            ("2026-10-01T00:00:00Z", "a"),
+            ("2026-10-20T00:00:00Z", "b"),
+            ("2026-10-21T00:00:00Z", "b"),
+            ("2026-10-22T00:00:00Z", "c"),
+            ("2026-10-23T00:00:00Z", "b"),
+        ] {
+            conn.execute("INSERT INTO content_revisions(path,ts,sha256) VALUES('f',?1,?2)", params![ts, hash])
+                .unwrap();
+        }
+        let store = Store { conn };
+        assert_eq!(store.content_changes_since(Path::new("f"), "2026-10-19T00:00:00Z").unwrap(), 3);
+        assert_eq!(store.content_changes_since(Path::new("f"), "2026-10-22T12:00:00Z").unwrap(), 1);
+    }
 }

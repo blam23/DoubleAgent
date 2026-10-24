@@ -78,7 +78,12 @@ pub fn render_text(reports: &[Report], summary: &Summary, min: Severity, show_al
         }
         for f in r.findings.iter().filter(|f| f.weight >= 10).take(12) {
             let line = f.line.map(|l| format!("L{l}")).unwrap_or_else(|| "  -".into());
-            writeln!(w, "    {:>5}  {:<10} {}: {}", line, f.rule_id, f.title, f.excerpt)?;
+            let atlas = if f.atlas.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", f.atlas.join(", "))
+            };
+            writeln!(w, "    {:>5}  {:<10} {}: {}{}", line, f.rule_id, f.title, f.excerpt, atlas)?;
         }
         let minor =
             r.findings.iter().filter(|f| f.weight < 10).count() + r.findings.iter().filter(|f| f.weight >= 10).count().saturating_sub(12);
@@ -189,14 +194,14 @@ pub fn render_sarif(reports: &[Report], min: Severity, w: &mut dyn Write) -> Res
         for f in r.findings.iter().filter(|f| f.weight >= 20) {
             rules.entry(f.rule_id.clone()).or_insert_with(|| {
                 json!({"id": f.rule_id, "name": f.title.replace(' ', ""), "shortDescription": {"text": f.title},
-                       "properties": {"category": f.category}})
+                       "properties": {"category": f.category, "atlas": &f.atlas}})
             });
             results.push(json!({
                 "ruleId": f.rule_id, "level": sarif_level(f.severity),
                 "message": {"text": format!("{}: {} — {}", f.title, f.excerpt, f.reason)},
                 "locations": [{"physicalLocation": {"artifactLocation": {"uri": uri},
                     "region": {"startLine": f.line.unwrap_or(1).max(1), "startColumn": f.column.unwrap_or(1).max(1)}}}],
-                "properties": {"category": f.category, "weight": f.weight}
+                "properties": {"category": f.category, "weight": f.weight, "atlas": &f.atlas}
             }));
         }
     }

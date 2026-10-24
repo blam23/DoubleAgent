@@ -225,6 +225,8 @@ impl<'a> Engine<'a> {
         for a in &analyzed {
             let row = self.store.get_file(&a.fd.path)?;
             let changed = row.as_ref().map(|r| r.sha256 != a.fd.sha256).unwrap_or(true);
+            let cutoff = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            let changes_7d = self.store.content_changes_since(&a.fd.path, &cutoff)? + u32::from(changed && row.is_some());
             let pin = allow.pin(&a.fd.path);
             let pinned_ok = pin.map(|p| p.sha256.as_deref() == Some(&a.fd.sha256)).unwrap_or(false);
             let pin_mismatch = pin.is_some() && !pinned_ok;
@@ -249,6 +251,7 @@ impl<'a> Engine<'a> {
                 parents: &parents,
                 pin_mismatch,
                 changed: changed && row.is_some(),
+                changes_7d,
             }));
             pre.push(Pre {
                 prov,

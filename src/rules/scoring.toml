@@ -8,11 +8,13 @@
 # To change a rule without rebuilding, add a [[scoring.rules]] entry with the
 # same `id` to your config. To switch one off, list it in
 # scoring.disabled_rules.
+# `atlas` lists directly related MITRE ATLAS v2026.09 technique IDs; [] means no direct mapping.
 
 # ── Provenance: where the file came from ──────────────────────────────────
 
 [[rules]]
 id = "PROV001"
+atlas = []
 score = "provenance"
 points = 35
 when = "in_dependency_dir"
@@ -20,6 +22,7 @@ reason = "inside a dependency/vendor folder ({dependency_dir})"
 
 [[rules]]
 id = "PROV002"
+atlas = []
 score = "provenance"
 points = 25
 # Dependency folders are normally gitignored; don't count that twice.
@@ -28,6 +31,7 @@ reason = "not tracked by git (planted or generated locally)"
 
 [[rules]]
 id = "PROV003"
+atlas = []
 score = "provenance"
 points = 10
 when = "!in_git"
@@ -35,6 +39,7 @@ reason = "not inside a git repository"
 
 [[rules]]
 id = "PROV004"
+atlas = []
 score = "provenance"
 points = 5
 when = "in_git && !has_remote"
@@ -42,6 +47,7 @@ reason = "repository has no origin remote"
 
 [[rules]]
 id = "PROV005"
+atlas = []
 score = "provenance"
 points = 15
 when = "in_git && remote_untrusted"
@@ -49,6 +55,7 @@ reason = "remote {remote} is not in provenance.trusted_remotes"
 
 [[rules]]
 id = "PROV006"
+atlas = []
 score = "provenance"
 points = 40
 when = "location == \"downloads\""
@@ -56,6 +63,7 @@ reason = "inside a Downloads folder"
 
 [[rules]]
 id = "PROV007"
+atlas = []
 score = "provenance"
 points = 20
 when = "location == \"temp\""
@@ -63,6 +71,7 @@ reason = "inside a temp folder"
 
 [[rules]]
 id = "PROV008"
+atlas = []
 score = "provenance"
 points = 20
 when = "is_symlink"
@@ -70,6 +79,7 @@ reason = "is a symlink to {symlink_target}"
 
 [[rules]]
 id = "PROV009"
+atlas = []
 score = "provenance"
 points = 10
 when = "world_writable"
@@ -77,6 +87,7 @@ reason = "world-writable"
 
 [[rules]]
 id = "PROV010"
+atlas = []
 score = "provenance"
 points = 10
 when = "recently_modified && untrusted_location"
@@ -84,6 +95,7 @@ reason = "appeared/changed within the last {recent_hours}h"
 
 [[rules]]
 id = "PROV011"
+atlas = []
 score = "provenance"
 points = 25
 when = "pin_mismatch"
@@ -91,15 +103,33 @@ reason = "content changed since it was hash-pinned"
 
 [[rules]]
 id = "PROV012"
+atlas = []
 score = "provenance"
 points = 5
 when = "changed && untrusted_location"
 reason = "changed since the last scan"
 
+[[rules]]
+id = "PROV013"
+atlas = []
+score = "provenance"
+points = 15
+when = "recently_modified && shadows && untrusted_location"
+reason = "recently modified shadow file in an untrusted location"
+
+[[rules]]
+id = "PROV014"
+atlas = []
+score = "provenance"
+points = 20
+when = "changes_7d >= 3"
+reason = "content changed {changes_7d} times in the last 7 days"
+
 # ── Shadow: overriding other instruction files ────────────────────────────
 
 [[rules]]
 id = "SHAD001"
+atlas = []
 score = "shadow"
 points = 10
 when = "has_parent"
@@ -107,6 +137,7 @@ reason = "overrides parent instruction file {parent}"
 
 [[rules]]
 id = "SHAD002"
+atlas = []
 score = "shadow"
 points = 15
 when = "is_override_file && has_siblings"
@@ -114,13 +145,23 @@ reason = "is an explicit override file next to another instruction file"
 
 [[rules]]
 id = "SHAD003"
+atlas = ["AML.T0051.001"]
 score = "shadow"
 points = 60
-when = "shadows && finding(\"PI001\", \"PI004\", \"PI005\")"
-reason = "uses language that discards or supersedes other instructions"
+when = "shadows && finding(\"PI001\", \"PI004\", \"PI005\", \"PI007\", \"PI008\", \"PI009\")"
+reason = "contains high-risk override, authority-impersonation, untrusted-source, or review-evasion language"
+
+[[rules]]
+id = "SHAD006"
+atlas = ["AML.T0051.001", "AML.T0057"]
+score = "shadow"
+points = 35
+when = "has_trusted_parent && untrusted_location && finding(\"EX011\", \"PI007\", \"PI008\", \"PI009\")"
+reason = "untrusted child of {trusted_parent} contains a high-risk instruction"
 
 [[rules]]
 id = "SHAD004"
+atlas = []
 score = "shadow"
 points = 25
 when = "has_trusted_parent && untrusted_location"
@@ -128,6 +169,7 @@ reason = "untrusted file shadows trusted parent {trusted_parent}"
 
 [[rules]]
 id = "SHAD005"
+atlas = []
 score = "shadow"
 points = 20
 when = "has_parent && content >= parent_content + 30"
