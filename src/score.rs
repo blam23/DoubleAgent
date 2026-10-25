@@ -406,8 +406,8 @@ mod tests {
             ..Default::default()
         };
         let (p, s) = eval_with(&defaults(), &ctx, "CLAUDE.md", 0, &[]);
-        assert_eq!(p.score, 35);
-        assert_eq!(p.reasons, ["+35 inside a dependency/vendor folder (node_modules) [PROV001]"]);
+        assert_eq!(p.score, 15);
+        assert_eq!(p.reasons, ["+15 inside a dependency/vendor folder (node_modules) [PROV001]"]);
         assert_eq!(s.score, 0);
     }
 
