@@ -30,7 +30,10 @@ jobs:
           libcairo2-dev \
           libx11-dev \
           libxrandr-dev \
-          libgdk-pixbuf-2.0-dev
+          libgdk-pixbuf-2.0-dev \
+          libgdk-3.0-dev \
+          libfontconfig1-dev \
+          libssl-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
