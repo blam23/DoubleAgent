@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use globset::GlobSet;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -99,6 +100,106 @@ impl<'a> Engine<'a> {
         })
     }
 
+    /// What shadow scoring needs to know about an ancestor instruction file.
+    fn parent_info(&self, enricher: &Enricher, allow: &Allow, path: &Path) -> Option<ParentInfo> {
+        let ReadOutcome::Read(fd) = scanner::read_candidate(path, &self.cfg.scan).ok()? else {
+            return None;
+        };
+        let st = self.analyzer.analyze(&fd.text);
+        let ctx = enricher.enrich(&fd);
+        let trusted = ctx.git_tracked == Some(true) || allow.pin(path).map(|r| r.sha256.as_deref() == Some(&fd.sha256)).unwrap_or(false);
+        Some(ParentInfo {
+            path: path.display().to_string(),
+            content_score: st.score,
+            trusted,
+        })
+    }
+
+    /// Rate editor text that may not be saved yet. Reads the store (pins, allow rules, history)
+    /// but writes nothing and takes no action; the file's location still supplies provenance.
+    pub fn evaluate_buffer(&self, path: &Path, text: &str) -> Result<Report> {
+        let allow = Allow::load(self.store)?;
+        let enricher = Enricher::new(&self.cfg.provenance, self.matcher);
+        let mut fd = match scanner::read_candidate(path, &self.cfg.scan) {
+            Ok(ReadOutcome::Read(fd)) => fd,
+            _ => FileData {
+                path: path.to_path_buf(),
+                text: String::new(),
+                sha256: String::new(),
+                size: 0,
+                truncated: false,
+                mtime: 0,
+                file_id: String::new(),
+                symlink_target: None,
+                world_writable: false,
+            },
+        };
+        let bytes = text.as_bytes();
+        let kept = &bytes[..bytes.len().min(self.cfg.scan.max_file_size as usize)];
+        fd.truncated = kept.len() < bytes.len();
+        fd.text = String::from_utf8_lossy(kept).into_owned();
+        fd.sha256 = hex::encode(Sha256::digest(kept));
+        fd.size = bytes.len() as u64;
+
+        let stat = self.analyzer.analyze(&fd.text);
+        let ctx = enricher.enrich(&fd);
+        let parents: Vec<ParentInfo> = ctx.parents.iter().filter_map(|p| self.parent_info(&enricher, &allow, p)).collect();
+        let parent_refs: Vec<&ParentInfo> = parents.iter().collect();
+
+        let row = self.store.get_file(path)?;
+        let changed = row.as_ref().map(|r| r.sha256 != fd.sha256).unwrap_or(true);
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let changes_7d = self.store.content_changes_since(path, &cutoff)? + u32::from(changed && row.is_some());
+        let pin = allow.pin(path);
+        let pinned_ok = pin.map(|p| p.sha256.as_deref() == Some(&fd.sha256)).unwrap_or(false);
+        let pin_mismatch = pin.is_some() && !pinned_ok;
+        let (disposition, allowed) = if pinned_ok {
+            (Some("pinned".to_string()), false)
+        } else if pin_mismatch {
+            (Some("pin-mismatch: changed since pinned, re-review required".to_string()), false)
+        } else if let Some(why) = allow.allowed_by(path, &ctx) {
+            (Some(why), true)
+        } else {
+            (None, false)
+        };
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let (prov, shadow) = self.rules.evaluate(&Facts::new(&Subject {
+            ctx: &ctx,
+            cfg: &self.cfg.provenance,
+            file_name: &name,
+            content: stat.score,
+            findings: &stat.findings,
+            parents: &parent_refs,
+            pin_mismatch,
+            changed: changed && row.is_some(),
+            changes_7d,
+        }));
+        let final_score = self.rules.combine(stat.score, prov.score, shadow.score);
+        let severity = Severity::from_score(final_score, &self.cfg.policy.thresholds);
+        Ok(Report {
+            path: path.to_path_buf(),
+            sha256: fd.sha256,
+            size: fd.size,
+            truncated: fd.truncated,
+            scanned_at: store::now(),
+            severity,
+            scores: Scores {
+                content: stat.score,
+                provenance: prov.score,
+                shadow: shadow.score,
+                final_score,
+            },
+            findings: stat.findings,
+            provenance_reasons: prov.reasons,
+            shadow_reasons: shadow.reasons,
+            context: ctx,
+            disposition,
+            suppressed: pinned_ok || (allowed && severity < Severity::Critical),
+            changed_since_last_scan: changed,
+            actions: vec![],
+        })
+    }
+
     pub fn process(&self, paths: Vec<PathBuf>) -> Result<Outcome> {
         self.run(paths, self.opts.skip_unchanged)
     }
@@ -119,7 +220,15 @@ impl<'a> Engine<'a> {
         for p in paths {
             if skip_unchanged {
                 if let (Some((size, mtime, fid)), Some(row)) = (scanner::quick_stat(&p), self.store.get_file(&p)?) {
-                    if row.size == size && row.mtime == mtime && row.file_id == fid {
+                    // Unchanged files are skipped, except ones now at or above quarantine_at (the setting
+                    // may have been lowered since they were scanned).
+                    let due_for_quarantine = self.opts.apply_actions
+                        && self
+                            .cfg
+                            .policy
+                            .quarantine_at
+                            .is_some_and(|at| row.last_severity.as_deref().and_then(Severity::parse).is_some_and(|s| s >= at));
+                    if row.size == size && row.mtime == mtime && row.file_id == fid && !due_for_quarantine {
                         out.unchanged += 1;
                         continue;
                     }
@@ -195,19 +304,8 @@ impl<'a> Engine<'a> {
             if parent_cache.contains_key(&p) {
                 continue;
             }
-            if let Ok(ReadOutcome::Read(fd)) = scanner::read_candidate(&p, &self.cfg.scan) {
-                let st = self.analyzer.analyze(&fd.text);
-                let ctx = enricher.enrich(&fd);
-                let trusted =
-                    ctx.git_tracked == Some(true) || allow.pin(&p).map(|r| r.sha256.as_deref() == Some(&fd.sha256)).unwrap_or(false);
-                parent_cache.insert(
-                    p.clone(),
-                    ParentInfo {
-                        path: p.display().to_string(),
-                        content_score: st.score,
-                        trusted,
-                    },
-                );
+            if let Some(info) = self.parent_info(&enricher, &allow, &p) {
+                parent_cache.insert(p, info);
             }
         }
 

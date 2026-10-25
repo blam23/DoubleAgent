@@ -25,6 +25,8 @@ Run all four before calling a change done. On Windows the build needs the MSVC t
 | `src/watch.rs` | Live monitor: `Batcher` turns watcher events into batches; reconcile catches dropped events |
 | `src/scanner.rs` | Directory walk, candidate matching, single-handle reads and hashing |
 | `src/policy.rs`, `src/output.rs`, `src/redact.rs` | Actions (notify, hook, quarantine), renderers, webhook redaction |
+| `src/lsp/` | `doubleagent-lsp` language server (stdio): diagnostics on editor buffers via `Engine::evaluate_buffer`; talks to a running service through `service::probe` / `fetch_reports` |
+| `vscode-extension/` | TypeScript VS Code client for the language server (`npm run compile`; packaging in its README) |
 | `src/store.rs` | SQLite state and hash-chained audit log |
 | `src/config.rs` | TOML config; every field has a default |
 

@@ -37,7 +37,7 @@ An `AGENTS.md` is an instruction file that coding agents read and obey automatic
         │ Policy Engine   │ thresholds → actions
         └────────┬────────┘
                  ▼
-   CLI / TUI / localhost dashboard / notifications / JSONL / webhook / SARIF
+   CLI / native egui app / system tray / notifications / JSONL / webhook / SARIF
 ```
 
 ## 3. Components
@@ -73,7 +73,7 @@ It produces the content score and a list of findings, each with a rule ID.
 
 **Policy engine.** Maps final severity to actions. Default is **report-only**. Optional actions are notify, run a hook, and quarantine (move to a holding directory with a restore command). Never delete. Allowlists are by path glob, repo remote, or **hash pin**, and a pinned file is re-reviewed automatically if its hash changes.
 
-**Interfaces.** CLI and TUI first. The dashboard is bound to `127.0.0.1` only. Outputs include OS notifications, JSON Lines, syslog, webhooks, and SARIF for CI. The daemon runs as a systemd user unit, a launchd agent, or a Windows service, with a Unix socket or named pipe for CLI-to-daemon IPC.
+**Interfaces.** The scanner and analysis pipeline is a shared Rust library used by the CLI and the separate `doubleagent-gui` application. The GUI uses eframe/egui and tray-icon, reads stored verdicts, and controls its live watcher. `daemon` offers headless monitoring with a read-only HTTP/JSON interface bound to `127.0.0.1:47831`; it serves no browser UI. `service files` generates a systemd user unit, launchd agent plist, or Windows logon task script for per-user startup. Outputs include native OS notifications, JSON Lines, webhooks, and SARIF for CI.
 
 ## 4. Scoring model
 
@@ -107,7 +107,7 @@ Read files by file descriptor and hash exactly the bytes you read, to avoid time
 
 1. Scanner, SQLite store, static analyzer, CLI report.
 2. Live monitor, reconcile loop, allowlists and hash pins.
-3. Daemon and service packaging, notifications, dashboard.
+3. Daemon and service packaging, native GUI, notifications.
 4. Quarantine, SARIF and CI mode.
 
 ## Open decisions

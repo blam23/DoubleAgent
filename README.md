@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icons/doubleagent-jade.svg" width="200">
+</p>
+
 # DoubleAgent: rogue AGENTS.md sentinel
 
 DoubleAgent finds agent instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, Copilot instructions, Cursor/Cline/Windsurf rules and similar) and scores each one on three independent risks:
@@ -14,11 +18,11 @@ The three combine into a final 0–100 score and a severity (info / low / medium
 
 ```powershell
 cargo build --release
-# binary: target\release\doubleagent.exe
+# binaries: target\release\doubleagent.exe and target\release\doubleagent-gui.exe
 cargo test
 ```
 
-On Windows you need the MSVC toolchain (Visual Studio Build Tools with "Desktop development with C++"), because SQLite is compiled from source and bundled. That keeps it a single self-contained binary.
+On Windows you need the MSVC toolchain (Visual Studio Build Tools with "Desktop development with C++"), because SQLite is compiled from source and bundled. The CLI and desktop app are separate executables; the GUI uses the same scanner library and database.
 
 ## Quick start
 
@@ -28,6 +32,10 @@ doubleagent scan . --min-severity info   # show everything, including clean file
 doubleagent scan . -f json -o report.json
 doubleagent scan . -f sarif -o da.sarif --fail-on high   # CI: exit code 1 at high or above
 doubleagent watch E:\code                # live monitor with periodic reconcile
+doubleagent daemon E:\code               # watcher plus local JSON IPC
+doubleagent-gui E:\code                  # native desktop monitor with tray icon
+doubleagent tui                         # browse latest verdicts in the terminal
+doubleagent service files               # generate a per-user startup definition
 doubleagent report                       # latest stored verdicts, no rescan
 ```
 
@@ -124,6 +132,18 @@ Notifications and hooks fire once for each new or changed file. Quarantine re-ch
 
 `-f text|json|jsonl|sarif`. You can also set `output.jsonl_path` to append every report to a log, and `output.webhook_url` to POST new or changed reports at or above `webhook_min_severity`. Excerpts are redacted before sending.
 
+## Desktop app, daemon and service startup
+
+The `doubleagent-gui` executable is a separate native desktop app built with eframe/egui. It reads the shared scanner library and database, shows verdict details and findings, supports on-demand scans and pause/resume, and stays in the system tray when its window is closed. The tray icon is the app icon with a status dot: green while monitoring, yellow after an alert notification you haven't seen yet, red when paused or stopped. Left-click the tray icon (or right-click → Show UI) to open the window; hovering does nothing. The **Options** tab edits and saves the config file (restarting the monitor), and can import, export or reset it. It also holds two GUI settings under `[gui]`: `run_on_startup` (default `true`; on Windows a `DoubleAgent.url` shortcut in the Startup folder) and `show_ui_on_startup` (default `true`; off = start in the tray). Release builds keep the startup shortcut in line with the setting on every launch. It uses the same configured roots as the CLI, or the home folder when no roots are configured. Pass `--config`, `--db` or scan paths to override defaults.
+
+### VS Code extension
+
+`vscode-extension/` is a VS Code client for `doubleagent-lsp`, a language server built from this repository. It rates instruction files from the editor buffer as you type, shows diagnostics, hovers and a "trust this exact content" quick fix, and lists every instruction file in the workspace. The server is bundled into the extension, so no separate install is needed, and it uses a running daemon or desktop app (loopback IPC on `127.0.0.1:47831`) when there is one but works without. See `vscode-extension/README.md`.
+
+Run `doubleagent daemon [paths...]` for headless monitoring plus a local read-only JSON interface at `http://127.0.0.1:47831/`. `GET /api/reports` returns the latest stored verdicts and `GET /health` reports whether the daemon is responding. The listener binds only to IPv4 loopback and serves no HTML or mutation commands. `doubleagent tui` remains available as a keyboard-driven terminal view (`↑`/`↓`, `q`).
+
+To prepare automatic user-session startup, run `doubleagent service files [directory]`. This writes the platform's startup definition or task registration script without elevating privileges: a systemd user unit on Linux, a LaunchAgent plist on macOS, and a PowerShell logon scheduled-task script and hidden VBScript runner on Windows. The Windows task runs under the logged-in user and launches the daemon without opening a console window. Install or enable the generated file with the platform's user-service mechanism. For Linux, copy the unit into `~/.config/systemd/user/`, then run `systemctl --user daemon-reload` and `systemctl --user enable --now doubleagent.service`; for macOS, install the plist under `~/Library/LaunchAgents/` and load it with `launchctl`; on Windows, run the generated PowerShell script in the user session. The daemon uses configured roots, or the home folder when no roots are configured.
+
 ## Self-defense
 
 * Each file is read through a single handle, and the hash covers exactly the bytes that were analyzed.
@@ -134,19 +154,5 @@ Notifications and hooks fire once for each new or changed file. Quarantine re-ch
 * Network mounts (NFS, SMB, sshfs, WSL drvfs) are skipped on Linux.
 * The audit log is hash-chained: `doubleagent audit verify` detects edited or removed entries.
 
-## Files
-
-`doubleagent config path` shows where the config, the state database (SQLite) and the quarantine folder live. On Windows these are under `%APPDATA%\DoubleAgent` and `%LOCALAPPDATA%\DoubleAgent`. `doubleagent config init` writes a commented default config; [`examples/config.toml`](examples/config.toml) is the same file.
-
-## Status against the architecture phases
-
-| Phase | Status |
-|---|---|
-| 1. Scanner, SQLite store, static analyzer, CLI report | ✅ |
-| 2. Live monitor, reconcile loop, allowlists, hash pins | ✅ native watcher, polling fallback, reconcile, rescan on overflow, new-folder detection |
-| 3. Daemon and service packaging, notifications, dashboard | ◐ OS notifications and webhook done. Service packaging, IPC, TUI and dashboard not started |
-| 4. Quarantine, SARIF and CI mode | ✅ |
-
-Not yet built: peeking inside archives, NTFS USN journal, syslog output, the macOS Full Disk Access guide, and whole-disk scanning presets.
-
 Open decisions, settled as defaults that are easy to change: report-only (quarantine is opt-in) and scanning only the roots you give it (home folder by default).
+```

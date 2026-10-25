@@ -43,6 +43,8 @@ fn git_cmd(dir: &Path) -> Command {
             "--no-pager",
         ])
         .env("GIT_OPTIONAL_LOCKS", "0")
+        // Never inherit our stdin: a host (like the language server) may be blocked reading it.
+        .stdin(Stdio::null())
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .stdin(Stdio::null())
@@ -76,6 +78,7 @@ impl<'a> Enricher<'a> {
         let git_ok = cfg.use_git
             && Command::new("git")
                 .arg("--version")
+                .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()

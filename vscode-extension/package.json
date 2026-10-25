@@ -1,0 +1,95 @@
+{
+  "name": "doubleagent",
+  "displayName": "DoubleAgent",
+  "description": "Finds and rates rogue AI agent instruction files (AGENTS.md, CLAUDE.md, Cursor and Copilot rules) as you open and edit them.",
+  "version": "0.1.0",
+  "publisher": "doubleagent",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The language server only reads files in untrusted folders. Choosing a custom server binary is disabled until the workspace is trusted.",
+      "restrictedConfigurations": [
+        "doubleagent.serverPath",
+        "doubleagent.configPath"
+      ]
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "doubleagent.rescan",
+        "title": "DoubleAgent: Rescan workspace"
+      },
+      {
+        "command": "doubleagent.restart",
+        "title": "DoubleAgent: Restart language server"
+      },
+      {
+        "command": "doubleagent.showLog",
+        "title": "DoubleAgent: Show server log"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "doubleagent.findings",
+          "name": "DoubleAgent",
+          "icon": "$(shield)"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DoubleAgent",
+      "properties": {
+        "doubleagent.serverPath": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "Path to a `doubleagent-lsp` binary. Empty = the one bundled with this extension, then `doubleagent-lsp` on your PATH."
+        },
+        "doubleagent.configPath": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "DoubleAgent config file. Empty = your per-user DoubleAgent config, shared with the CLI and desktop app."
+        },
+        "doubleagent.useService": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Use a running DoubleAgent daemon or desktop app (on `127.0.0.1:47831`) when there is one. Never required."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "render-icons": "node scripts/render-icons.mjs",
+    "bundle-server": "node scripts/bundle-server.mjs",
+    "package": "npm run compile && vsce package",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.5.0"
+  }
+}

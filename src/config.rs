@@ -17,6 +17,7 @@ pub struct Config {
     pub policy: PolicyConfig,
     pub watch: WatchConfig,
     pub output: OutputConfig,
+    pub gui: GuiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,6 +339,24 @@ impl Default for OutputConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GuiConfig {
+    /// Start the desktop app when you sign in (Windows: a shortcut in the Startup folder).
+    pub run_on_startup: bool,
+    /// Open the window on launch. Off = start minimised in the system tray.
+    pub show_ui_on_startup: bool,
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        Self {
+            run_on_startup: true,
+            show_ui_on_startup: true,
+        }
+    }
+}
+
 pub fn app_dir() -> PathBuf {
     dirs::data_local_dir()
         .or_else(dirs::home_dir)
@@ -380,6 +399,10 @@ impl Config {
         }
         crate::score::RuleSet::new(&self.scoring)?;
         Ok(())
+    }
+
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(self).context("serializing config")
     }
 
     pub fn default_toml() -> String {

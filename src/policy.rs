@@ -2,6 +2,7 @@
 //! Optional: OS notification, hook command, quarantine (move, never delete).
 
 use anyhow::{bail, Context as _, Result};
+use notify_rust::Notification;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -41,7 +42,7 @@ pub fn apply(report: &mut Report, cfg: &Config, store: &Store, fresh: bool) -> V
         }
     }
     if cfg.policy.quarantine_at.map(|t| sev >= t).unwrap_or(false) {
-        match quarantine(&report.path, &report.sha256, cfg, store) {
+        match quarantine(&report.path, &report.sha256, cfg, store, report, false) {
             Ok((id, dest)) => {
                 done.push(format!(
                     "quarantined as #{id} → {} (restore with `doubleagent restore {id}`)",
@@ -58,51 +59,8 @@ pub fn apply(report: &mut Report, cfg: &Config, store: &Store, fresh: bool) -> V
     done
 }
 
-fn notify(msg: &str) -> Result<()> {
-    // The message is passed via environment/argv, never interpolated into a script.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let script = "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; \
-            $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Warning; \
-            $n.Visible = $true; $n.ShowBalloonTip(10000, 'DoubleAgent', $env:DA_MSG, 'Warning'); Start-Sleep -Seconds 11; $n.Dispose()";
-        Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script])
-            .env("DA_MSG", msg)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(0x0800_0000)
-            .spawn()?;
-        return Ok(());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("osascript")
-            .args([
-                "-e",
-                "on run argv",
-                "-e",
-                "display notification (item 1 of argv) with title \"DoubleAgent\"",
-                "-e",
-                "end run",
-                msg,
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        return Ok(());
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        Command::new("notify-send")
-            .args(["-u", "critical", "DoubleAgent", msg])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        return Ok(());
-    }
-    #[allow(unreachable_code)]
+pub fn notify(msg: &str) -> Result<()> {
+    Notification::new().summary("DoubleAgent").body(msg).show()?;
     Ok(())
 }
 
@@ -145,7 +103,7 @@ fn move_file(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn quarantine(path: &Path, expected_sha: &str, cfg: &Config, store: &Store) -> Result<(i64, PathBuf)> {
+pub fn quarantine(path: &Path, expected_sha: &str, cfg: &Config, store: &Store, report: &Report, manual: bool) -> Result<(i64, PathBuf)> {
     // Re-hash right before moving: if the file changed since it was rated, don't act on stale data.
     let now_sha = sha256_file(path, cfg.scan.max_file_size)?;
     if now_sha != expected_sha {
@@ -160,9 +118,9 @@ pub fn quarantine(path: &Path, expected_sha: &str, cfg: &Config, store: &Store) 
         .unwrap_or_else(|| "file".into());
     let dest = dir.join(format!("{stamp}-{}-{name}.quarantined", &expected_sha[..12]));
     move_file(path, &dest)?;
-    let meta = serde_json::json!({"original_path": path, "sha256": expected_sha, "quarantined_at": crate::store::now()});
+    let meta = serde_json::json!({"original_path": path, "sha256": expected_sha, "quarantined_at": crate::store::now(), "manual": manual});
     let _ = std::fs::write(dest.with_extension("json"), serde_json::to_string_pretty(&meta)?);
-    let id = store.add_quarantine(path, &dest, expected_sha)?;
+    let id = store.add_quarantine(path, &dest, expected_sha, manual, Some(report))?;
     store.audit("quarantine", &format!("#{id} {} -> {}", path.display(), dest.display()))?;
     Ok((id, dest))
 }

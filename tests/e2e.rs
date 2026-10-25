@@ -37,7 +37,12 @@ fn fixture(root: &Path) {
 }
 
 fn scan(root: &Path, db: &Path, extra: &[&str]) -> (i32, Value) {
+    // An empty config next to the db, so the user's real config (quarantine_at, ...) can't leak in.
+    let config = db.with_file_name("test-config.toml");
+    std::fs::write(&config, "").unwrap();
     let out = Command::new(BIN)
+        .arg("--config")
+        .arg(&config)
         .arg("--db")
         .arg(db)
         .args(["scan", "-f", "json", "--min-severity", "info"])
@@ -138,4 +143,38 @@ fn audit_log_verifies() {
     scan(tmp.path(), &db, &[]);
     let out = Command::new(BIN).arg("--db").arg(&db).args(["audit", "verify"]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn lowering_quarantine_at_catches_files_that_were_already_scanned() {
+    let tmp = tempfile::tempdir().unwrap();
+    fixture(tmp.path());
+    let db = tmp.path().join("state.db");
+    let run = |config: &Path, args: &[&str]| {
+        Command::new(BIN)
+            .arg("--config")
+            .arg(config)
+            .arg("--db")
+            .arg(&db)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let off = tmp.path().join("off.toml");
+    std::fs::write(&off, "").unwrap();
+    let on = tmp.path().join("on.toml");
+    std::fs::write(
+        &on,
+        format!("[policy]\nquarantine_at = \"high\"\nquarantine_dir = {:?}\n", tmp.path().join("q")),
+    )
+    .unwrap();
+
+    run(&off, &["scan", tmp.path().to_str().unwrap()]);
+    assert!(String::from_utf8_lossy(&run(&off, &["quarantine"]).stdout).contains("Nothing quarantined"));
+
+    // Same files, unchanged on disk: the new threshold must still apply.
+    run(&on, &["scan", tmp.path().to_str().unwrap()]);
+    let listed = String::from_utf8_lossy(&run(&on, &["quarantine"]).stdout).into_owned();
+    assert!(listed.contains("AGENTS.md"), "{listed}");
+    assert!(!tmp.path().join("repo/sub/AGENTS.md").exists());
 }

@@ -43,6 +43,10 @@ pub struct QuarantineRow {
     pub sha256: String,
     pub ts: String,
     pub restored: bool,
+    /// Quarantined by hand from the desktop app rather than by policy.
+    pub manual: bool,
+    /// The verdict that led to the quarantine (findings and provenance).
+    pub report: Option<Report>,
 }
 
 pub fn now() -> String {
@@ -79,9 +83,20 @@ impl Store {
              DROP TABLE IF EXISTS ai_cache;
              DROP TABLE IF EXISTS ai_usage;
              CREATE TABLE IF NOT EXISTS allow_rules(id INTEGER PRIMARY KEY, kind TEXT, pattern TEXT, sha256 TEXT, note TEXT, created TEXT);
-             CREATE TABLE IF NOT EXISTS quarantine(id INTEGER PRIMARY KEY, original_path TEXT, stored_path TEXT, sha256 TEXT, ts TEXT, restored INTEGER DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS quarantine(id INTEGER PRIMARY KEY, original_path TEXT, stored_path TEXT, sha256 TEXT, ts TEXT, restored INTEGER DEFAULT 0, manual INTEGER DEFAULT 0, report TEXT);
              CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, ts TEXT, action TEXT, detail TEXT, prev_hash TEXT, hash TEXT);",
         )?;
+        // Databases created before manual / report existed.
+        for (column, ddl) in [("manual", "INTEGER DEFAULT 0"), ("report", "TEXT")] {
+            let has: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('quarantine') WHERE name=?1",
+                params![column],
+                |r| r.get(0),
+            )?;
+            if !has {
+                conn.execute_batch(&format!("ALTER TABLE quarantine ADD COLUMN {column} {ddl}"))?;
+            }
+        }
         Ok(Store { conn })
     }
 
@@ -271,17 +286,18 @@ impl Store {
     }
 
     // ---------- quarantine ----------
-    pub fn add_quarantine(&self, original: &Path, stored: &Path, sha: &str) -> Result<i64> {
+    pub fn add_quarantine(&self, original: &Path, stored: &Path, sha: &str, manual: bool, report: Option<&Report>) -> Result<i64> {
+        let report = report.map(serde_json::to_string).transpose()?;
         self.conn.execute(
-            "INSERT INTO quarantine(original_path,stored_path,sha256,ts) VALUES(?1,?2,?3,?4)",
-            params![key(original), key(stored), sha, now()],
+            "INSERT INTO quarantine(original_path,stored_path,sha256,ts,manual,report) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![key(original), key(stored), sha, now(), manual, report],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
     pub fn list_quarantine(&self) -> Result<Vec<QuarantineRow>> {
         let mut st = self
             .conn
-            .prepare("SELECT id,original_path,stored_path,sha256,ts,restored FROM quarantine ORDER BY id")?;
+            .prepare("SELECT id,original_path,stored_path,sha256,ts,restored,manual,report FROM quarantine ORDER BY id")?;
         let rows = st.query_map([], |r| {
             Ok(QuarantineRow {
                 id: r.get(0)?,
@@ -290,9 +306,27 @@ impl Store {
                 sha256: r.get(3)?,
                 ts: r.get(4)?,
                 restored: r.get::<_, i64>(5)? != 0,
+                manual: r.get::<_, Option<i64>>(6)?.unwrap_or(0) != 0,
+                report: r.get::<_, Option<String>>(7)?.and_then(|text| serde_json::from_str(&text).ok()),
             })
         })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        let mut rows: Vec<QuarantineRow> = rows.collect::<std::result::Result<_, _>>()?;
+        // Entries from before the reason was stored: fall back to the verdict recorded for that content.
+        for row in rows.iter_mut().filter(|row| row.report.is_none()) {
+            row.report = self.verdict_for(&row.original_path, &row.sha256)?;
+        }
+        Ok(rows)
+    }
+    fn verdict_for(&self, path: &str, sha256: &str) -> Result<Option<Report>> {
+        let text: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT report FROM verdicts WHERE path=?1 AND sha256=?2 ORDER BY id DESC LIMIT 1",
+                params![path, sha256],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(text.and_then(|t| serde_json::from_str(&t).ok()))
     }
     pub fn mark_restored(&self, id: i64) -> Result<()> {
         self.conn.execute("UPDATE quarantine SET restored=1 WHERE id=?1", params![id])?;

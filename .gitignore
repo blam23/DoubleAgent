@@ -3,6 +3,9 @@
 *.db-wal
 *.db-shm
 
+# Scratch
+todo.md
+
 #
 # Github rust default .gitignore
 #

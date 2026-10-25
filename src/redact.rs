@@ -48,6 +48,12 @@ impl Redactor {
     }
 }
 
+impl Default for Redactor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,23 +1,8 @@
 //! DoubleAgent: rogue AGENTS.md sentinel.
 
-mod analyzer;
-mod atlas;
-mod config;
-mod engine;
-mod enrich;
-mod expr;
-mod model;
-mod output;
-mod policy;
-mod redact;
-mod scanner;
-mod score;
-mod store;
-mod text;
-mod watch;
-
 use anyhow::{bail, Context as _, Result};
 use clap::{Parser, Subcommand};
+use doubleagent::{atlas, config, engine, model, output, policy, scanner, score, service, store, tui, watch};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -78,6 +63,19 @@ enum Cmd {
         min_severity: Severity,
         #[arg(long)]
         no_actions: bool,
+    },
+    /// Run the live monitor with local read-only JSON IPC enabled.
+    Daemon {
+        paths: Vec<PathBuf>,
+        #[arg(long)]
+        no_actions: bool,
+    },
+    /// Open the terminal verdict browser.
+    Tui,
+    /// Generate an OS user-service definition for this executable.
+    Service {
+        #[command(subcommand)]
+        cmd: ServiceCmd,
     },
     /// Show the latest stored verdicts without rescanning.
     Report {
@@ -162,6 +160,12 @@ enum AuditCmd {
         limit: usize,
     },
     Verify,
+}
+
+#[derive(Subcommand)]
+enum ServiceCmd {
+    /// Write the current platform's service/task files into a directory.
+    Files { directory: Option<PathBuf> },
 }
 
 fn main() {
@@ -378,6 +382,40 @@ fn run() -> Result<i32> {
                     let _ = output::render_text(&owned, &summary, min_severity, false, &mut so);
                 }
             })?;
+            Ok(0)
+        }
+        Cmd::Daemon { paths, no_actions } => {
+            let roots = resolve_roots(paths, &cfg)?;
+            let addr = service::start(db_path.clone())?;
+            eprintln!("Read-only local IPC listening at http://{addr}/");
+            let opts = RunOptions {
+                apply_actions: !no_actions,
+                skip_unchanged: true,
+            };
+            let engine = Engine::new(&cfg, &store, &matcher, opts)?;
+            watch::run(&engine, &roots, |out, label| {
+                if label != "change" || !out.reports.is_empty() {
+                    eprintln!("{label}: {} files checked, {} unchanged", out.reports.len(), out.unchanged);
+                }
+            })?;
+            Ok(0)
+        }
+        Cmd::Tui => {
+            tui::run(&store.latest_reports(Severity::Info)?)?;
+            Ok(0)
+        }
+        Cmd::Service {
+            cmd: ServiceCmd::Files { directory },
+        } => {
+            let exe = std::env::current_exe().context("resolving executable path")?;
+            let dir = directory.unwrap_or_else(|| std::env::current_dir().unwrap_or_default().join("service-files"));
+            let files = service::write_service_files(&dir, &exe)?;
+            if files.is_empty() {
+                bail!("service packaging is unsupported on this platform");
+            }
+            for path in files {
+                println!("Wrote {}", path.display());
+            }
             Ok(0)
         }
         Cmd::Report {

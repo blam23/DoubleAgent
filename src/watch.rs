@@ -16,6 +16,15 @@ use crate::scanner::{self, Matcher};
 /// A batch waits at most this many debounce periods, however busy the tree is.
 const MAX_WAIT_DEBOUNCES: u32 = 4;
 
+/// Commands accepted by a controllable monitor, such as the desktop app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchCommand {
+    ScanNow,
+    Pause,
+    Resume,
+    Quit,
+}
+
 /// Work collected from watcher events.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Batch {
@@ -107,6 +116,25 @@ impl Batcher {
 }
 
 pub fn run(engine: &Engine, roots: &[PathBuf], mut on_outcome: impl FnMut(&Outcome, &str)) -> Result<()> {
+    run_inner(engine, roots, None, &mut on_outcome)
+}
+
+/// Run the monitor until its command channel closes or receives `Quit`.
+pub fn run_controlled(
+    engine: &Engine,
+    roots: &[PathBuf],
+    commands: mpsc::Receiver<WatchCommand>,
+    mut on_outcome: impl FnMut(&Outcome, &str),
+) -> Result<()> {
+    run_inner(engine, roots, Some(commands), &mut on_outcome)
+}
+
+fn run_inner(
+    engine: &Engine,
+    roots: &[PathBuf],
+    commands: Option<mpsc::Receiver<WatchCommand>>,
+    on_outcome: &mut impl FnMut(&Outcome, &str),
+) -> Result<()> {
     let cfg = engine.cfg;
     check_inotify_limits();
 
@@ -149,14 +177,39 @@ pub fn run(engine: &Engine, roots: &[PathBuf], mut on_outcome: impl FnMut(&Outco
     );
 
     // Initial reconcile so the store reflects the current state.
-    reconcile(engine, roots, &mut on_outcome, "initial scan")?;
+    reconcile(engine, roots, on_outcome, "initial scan")?;
 
     let mut batcher = Batcher::new(Duration::from_millis(cfg.watch.debounce_ms.max(100)));
     let reconcile_every = Duration::from_secs(cfg.watch.reconcile_minutes.max(1) * 60);
     let mut last_reconcile = Instant::now();
     let mut need_full = false;
+    let mut paused = false;
 
     loop {
+        let mut should_quit = false;
+        if let Some(rx) = &commands {
+            loop {
+                match rx.try_recv() {
+                    Ok(WatchCommand::ScanNow) => {
+                        paused = false;
+                        need_full = true;
+                    }
+                    Ok(WatchCommand::Pause) => paused = true,
+                    Ok(WatchCommand::Resume) => {
+                        paused = false;
+                        need_full = true;
+                    }
+                    Ok(WatchCommand::Quit) | Err(mpsc::TryRecvError::Disconnected) => {
+                        should_quit = true;
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                }
+            }
+        }
+        if should_quit {
+            break;
+        }
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(Ok(ev)) => {
                 if ev.need_rescan() {
@@ -172,16 +225,22 @@ pub fn run(engine: &Engine, roots: &[PathBuf], mut on_outcome: impl FnMut(&Outco
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
+        if paused {
+            if batcher.take(Instant::now()).is_some() {
+                need_full = true;
+            }
+            continue;
+        }
         if need_full || last_reconcile.elapsed() >= reconcile_every {
             batcher.clear();
             need_full = false;
-            reconcile(engine, roots, &mut on_outcome, "reconcile")?;
+            reconcile(engine, roots, on_outcome, "reconcile")?;
             last_reconcile = Instant::now();
             continue;
         }
 
         if let Some(batch) = batcher.take(Instant::now()) {
-            apply(engine, batch, &mut on_outcome)?;
+            apply(engine, batch, on_outcome)?;
         }
     }
     drop(native);

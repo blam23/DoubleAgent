@@ -1,0 +1,33 @@
+name: VS Code extension
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ "vscode-v*" ]
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - { os: windows-latest, target: win32-x64, exe: doubleagent-lsp.exe }
+          - { os: ubuntu-latest, target: linux-x64, exe: doubleagent-lsp }
+          - { os: macos-latest, target: darwin-arm64, exe: doubleagent-lsp }
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build the language server
+      run: cargo build --release --bin doubleagent-lsp
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
+    - name: Package
+      working-directory: vscode-extension
+      run: |
+        npm ci
+        node scripts/bundle-server.mjs ../target/release/${{ matrix.exe }}
+        npx vsce package --target ${{ matrix.target }} --allow-missing-repository --skip-license
+    - uses: actions/upload-artifact@v4
+      with:
+        name: doubleagent-${{ matrix.target }}
+        path: vscode-extension/*.vsix

@@ -41,7 +41,7 @@ id = "PI003"
 atlas = ["AML.T0051.001"]
 title = "Covert-action wording"
 category = "deception"
-weight = 20
+weight = 30
 reason = "Words such as 'silently' or 'secretly' attached to actions."
 pattern = '''\b(silently|secretly|quietly|covertly|discreetly|stealthily)\b'''
 
@@ -59,7 +59,7 @@ id = "PI005"
 atlas = ["AML.T0051.001"]
 title = "Claims to supersede other instruction files"
 category = "prompt-injection"
-weight = 30
+weight = 50
 reason = "Claims precedence over other agent files or safety rules."
 pattern = '''\b(this\s+file\s+)?(supersedes|overrides|takes\s+precedence\s+over|replaces)\s+(all\s+|any\s+)?(other\s+|previous\s+|parent\s+)?(instructions|rules|agents?\.md|claude\.md|policies|guidelines|safety)'''
 

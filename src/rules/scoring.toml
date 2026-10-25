@@ -16,7 +16,7 @@
 id = "PROV001"
 atlas = []
 score = "provenance"
-points = 35
+points = 15
 when = "in_dependency_dir"
 reason = "inside a dependency/vendor folder ({dependency_dir})"
 
@@ -124,6 +124,14 @@ score = "provenance"
 points = 20
 when = "changes_7d >= 3"
 reason = "content changed {changes_7d} times in the last 7 days"
+
+[[rules]]
+id = "PROV015"
+atlas = []
+score = "provenance"
+points = 50
+when = "location == \"downloads\" && finding(\"PI001\", \"PI004\", \"PI005\", \"PI007\", \"PI008\", \"PI009\")"
+reason = "in downloads and has high-risk override, authority-impersonation, untrusted-source, or review-evasion language"
 
 # ── Shadow: overriding other instruction files ────────────────────────────
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">DoubleAgent diagonal eye — jade iris</title>
+  <g fill="#4AAD88">
+    <path d="M 136 112 L 228 28 Q 256 0 284 28 L 484 228 Q 512 256 484 284 L 427 341 Q 414 354 402 344 Q 394 338 391 325 C 365 214 275 158 153 134 Q 132 131 136 112 Z"/>
+    <g transform="rotate(180 256 256)"><path d="M 136 112 L 228 28 Q 256 0 284 28 L 484 228 Q 512 256 484 284 L 427 341 Q 414 354 402 344 Q 394 338 391 325 C 365 214 275 158 153 134 Q 132 131 136 112 Z"/></g>
+  </g>
+  <circle cx="256" cy="256" r="49" fill="#4AAD88"/>
+</svg>
