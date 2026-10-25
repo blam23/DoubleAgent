@@ -29,7 +29,8 @@ jobs:
           libpango1.0-dev \
           libcairo2-dev \
           libx11-dev \
-          libxrandr-dev
+          libxrandr-dev \
+          libgdk-pixbuf-2.0-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
