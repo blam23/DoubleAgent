@@ -24,7 +24,12 @@ jobs:
           libwayland-dev \
           wayland-protocols \
           pkg-config \
-          build-essential
+          build-essential \
+          libatk1.0-dev \
+          libpangocairo-1.0-dev \
+          libcairo2-dev \
+          libx11-dev \
+          libxrandr-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
