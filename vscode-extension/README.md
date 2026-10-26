@@ -22,7 +22,7 @@ It reads the same config and state database as the CLI and desktop app, so your 
 cargo build --release --bin doubleagent-lsp
 cd vscode-extension
 npm install
-npm run bundle-server          # copies ../target/release/doubleagent-lsp[.exe] into ./server
+npm run bundle-server          # copies the binary into server/<platform>-<architecture>/
 npm run package                # one VSIX for this platform
 ```
 
