@@ -15,7 +15,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not read git status.' }
     if ($changes) { throw 'Commit or stash all changes before releasing.' }
 
-    $branch = (& git branch --show-current).Trim()
+    $branch = ((& git branch --show-current) -join '').Trim()
     if ($LASTEXITCODE -ne 0 -or -not $branch) { throw 'Check out a branch before releasing.' }
 
     $packagePath = Join-Path $PSScriptRoot 'vscode-extension/package.json'
@@ -30,7 +30,7 @@ try {
     $version = "$major.$minor.0"
     $tag = "vscode-v$version"
 
-    $existingTag = (& git tag --list $tag).Trim()
+    $existingTag = ((& git tag --list $tag) -join '').Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Could not check existing git tags.' }
     if ($existingTag) { throw "Tag $tag already exists." }
 
