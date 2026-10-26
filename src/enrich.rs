@@ -29,8 +29,18 @@ pub struct Enricher<'a> {
     dir_listing: Mutex<HashMap<PathBuf, Vec<PathBuf>>>,
 }
 
-fn git_cmd(dir: &Path) -> Command {
+fn git_command() -> Command {
     let mut c = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    c
+}
+
+fn git_cmd(dir: &Path) -> Command {
+    let mut c = git_command();
     c.arg("-C")
         .arg(dir)
         .args([
@@ -50,11 +60,6 @@ fn git_cmd(dir: &Path) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
     c
 }
 
@@ -76,7 +81,7 @@ fn sanitize_remote(u: &str) -> String {
 impl<'a> Enricher<'a> {
     pub fn new(cfg: &'a ProvenanceConfig, matcher: &'a Matcher) -> Self {
         let git_ok = cfg.use_git
-            && Command::new("git")
+            && git_command()
                 .arg("--version")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
