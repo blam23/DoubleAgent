@@ -47,7 +47,8 @@ function serverCommand(context: vscode.ExtensionContext): string {
   const exe = process.platform === 'win32' ? 'doubleagent-lsp.exe' : 'doubleagent-lsp';
   const configured = vscode.workspace.getConfiguration('doubleagent').get<string>('serverPath', '').trim();
   if (configured) return configured;
-  const bundled = context.asAbsolutePath(path.join('server', exe));
+  const target = `${process.platform}-${process.arch}`;
+  const bundled = context.asAbsolutePath(path.join('server', target, exe));
   return fs.existsSync(bundled) ? bundled : 'doubleagent-lsp';
 }
 

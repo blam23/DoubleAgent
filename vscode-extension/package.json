@@ -80,6 +80,7 @@
     "render-icons": "node scripts/render-icons.mjs",
     "bundle-server": "node scripts/bundle-server.mjs",
     "package": "npm run compile && vsce package",
+    "publish:all": "vsce publish --target win32-x64 linux-x64 darwin-arm64 darwin-x64 --ignore-other-target-folders --allow-missing-repository --skip-license",
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {

@@ -45,14 +45,71 @@ jobs:
       run: cargo build --release --bin doubleagent-lsp
     - uses: actions/setup-node@v4
       with:
-        node-version: 20
+        node-version: 22
     - name: Package
       working-directory: vscode-extension
       run: |
         npm ci
-        node scripts/bundle-server.mjs ../target/release/${{ matrix.exe }}
-        npx vsce package --target ${{ matrix.target }} --allow-missing-repository --skip-license
+        node scripts/bundle-server.mjs ../target/release/${{ matrix.exe }} ${{ matrix.target }}
+        npx vsce package --target ${{ matrix.target }} --ignore-other-target-folders --allow-missing-repository --skip-license
     - uses: actions/upload-artifact@v4
       with:
-        name: doubleagent-${{ matrix.target }}
+        name: doubleagent-vsix-${{ matrix.target }}
         path: vscode-extension/*.vsix
+    - uses: actions/upload-artifact@v4
+      with:
+        name: doubleagent-lsp-${{ matrix.target }}
+        path: target/release/${{ matrix.exe }}
+
+  publish:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/vscode-v')
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - name: Download platform language servers
+      uses: actions/download-artifact@v4
+      with:
+        pattern: doubleagent-lsp-*
+        path: artifacts
+        merge-multiple: false
+    - name: Install extension dependencies and bundle servers
+      working-directory: vscode-extension
+      run: |
+        npm ci
+        node scripts/bundle-server.mjs ../artifacts/doubleagent-lsp-win32-x64/doubleagent-lsp.exe win32-x64
+        node scripts/bundle-server.mjs ../artifacts/doubleagent-lsp-linux-x64/doubleagent-lsp linux-x64
+        node scripts/bundle-server.mjs ../artifacts/doubleagent-lsp-darwin-arm64/doubleagent-lsp darwin-arm64
+        node scripts/bundle-server.mjs ../artifacts/doubleagent-lsp-darwin-x64/doubleagent-lsp darwin-x64
+    - name: Publish all platform targets
+      working-directory: vscode-extension
+      run: npm run publish:all
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  release:
+    needs: [package, publish]
+    if: startsWith(github.ref, 'refs/tags/vscode-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download platform VSIX packages
+      uses: actions/download-artifact@v4
+      with:
+        pattern: doubleagent-vsix-*
+        path: release-assets
+        merge-multiple: false
+    - name: Attach VSIX packages to the GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: DoubleAgent VS Code ${{ github.ref_name }}
+        generate_release_notes: true
+        fail_on_unmatched_files: true
+        files: release-assets/**/*.vsix
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
