@@ -25,6 +25,10 @@ DoubleAgent finds agent instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
 
 The three combine into a final 0–100 score and a severity (info / low / medium / high / critical). The design is in [`docs/architecture.md`](docs/architecture.md).
 
+<p align="left">
+  <img src=".github/screens/quarantine.png" alt="Screenshot of Quarantine GUI">
+</p>
+
 ## Build
 
 ```powershell
