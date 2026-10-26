@@ -1,5 +1,16 @@
 <p align="center">
   <img src="assets/icons/doubleagent-jade.svg" width="200">
+  <br/>
+  <a href="https://github.com/blam23/DoubleAgent/actions/workflows/rust.yml">
+    <img src="https://github.com/blam23/DoubleAgent/actions/workflows/rust.yml/badge.svg" alt="Rust">
+  </a>
+  <a href="https://github.com/blam23/DoubleAgent/actions/workflows/vscode.yml">
+    <img src="https://github.com/blam23/DoubleAgent/actions/workflows/vscode.yml/badge.svg" alt="VS Code extension">
+  </a>
+  <br/>
+  <a href="https://marketplace.visualstudio.com/items?itemName=doubleagent.doubleagent">
+    <b>View On Visual Studio Marketplace</b>
+  </a>
 </p>
 
 # DoubleAgent: rogue AGENTS.md sentinel
