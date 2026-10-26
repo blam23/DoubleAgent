@@ -26,7 +26,7 @@ npm run bundle-server          # copies ../target/release/doubleagent-lsp[.exe] 
 npm run package                # one VSIX for this platform
 ```
 
-For other platforms build `doubleagent-lsp` there and run `vsce package --target <win32-x64|linux-x64|darwin-arm64|…>`; `.github/workflows/vscode.yml` does this for three targets. To try it, open this folder in VS Code and press F5, or install the VSIX.
+For other platforms build `doubleagent-lsp` there and run `vsce package --target <win32-x64|linux-x64|darwin-arm64|darwin-x64|…>`; `.github/workflows/vscode.yml` does this for Windows x64, Linux x64, and both macOS architectures. To try it, open this folder in VS Code and press F5, or install the VSIX.
 
 ## Settings
 

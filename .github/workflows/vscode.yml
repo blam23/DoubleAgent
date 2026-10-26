@@ -5,6 +5,9 @@ on:
   push:
     tags: [ "vscode-v*" ]
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   package:
     strategy:
@@ -13,9 +16,31 @@ jobs:
           - { os: windows-latest, target: win32-x64, exe: doubleagent-lsp.exe }
           - { os: ubuntu-latest, target: linux-x64, exe: doubleagent-lsp }
           - { os: macos-latest, target: darwin-arm64, exe: doubleagent-lsp }
+          - { os: macos-15-intel, target: darwin-x64, exe: doubleagent-lsp }
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install Linux system dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libglib2.0-dev \
+          libwayland-dev \
+          wayland-protocols \
+          pkg-config \
+          build-essential \
+          libatk1.0-dev \
+          libpango1.0-dev \
+          libcairo2-dev \
+          libx11-dev \
+          libxrandr-dev \
+          libgdk-pixbuf-2.0-dev \
+          libgtk-3-dev \
+          libfontconfig1-dev \
+          libssl-dev
     - name: Build the language server
       run: cargo build --release --bin doubleagent-lsp
     - uses: actions/setup-node@v4
